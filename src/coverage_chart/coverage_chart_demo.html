@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coverage Chart Demo</title>
+
+  <link rel="stylesheet" href="./src/coverage_chart/coverageChart.css" />
+
+  <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBgQF+KQAAAABJRU5ErkJggg==" />
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2em;
+    }
+
+    #controls {
+      margin-bottom: 1.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button {
+      padding: 8px 14px;
+      border: 1px solid #ccc;
+      background: #f5f5f5;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    button:hover {
+      background: #eaeaea;
+    }
+
+    #chart-container {
+      width: 100%;
+      max-width: 1200px;
+      margin: auto;
+      min-height: 500px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    canvas {
+      background: #ffffff;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+  </style>
+</head>
+
+<body>
+
+  <div style="max-width:1200px;margin:auto;">
+    <h1 style="margin-bottom:0.5em;">Coverage Chart Demo</h1>
+    <div id="controls" style="margin-bottom:1em;">
+      <label for="viewSelect" style="margin-right:8px;font-weight:500;">View:</label>
+      <select id="viewSelect" style="padding:6px 12px;border-radius:4px;border:1px solid #ccc;font-size:14px;">
+        <option value="carrier">Carrier View</option>
+        <option value="group">Carrier Group View</option>
+        <option value="availability">Availability View</option>
+      </select>
+      <button id="scaleToggleBtn">Toggle Log Scale</button>
+      <button id="zoomSmallBtn">Zoom Small Layers</button>
+    </div>
+    <div id="chart-container">
+      <canvas id="coverageChart" width="1200" height="500"></canvas>
+    </div>
+  </div>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- ES MODULE -->
+  <script type="module">
+    import { renderCoverageChart } from './src/coverage_chart/coverageChart.js';
+
+    let chartData = null;
+    async function init() {
+      try {
+        const response = await fetch('./data/coverage_policies.json');
+        if (!response.ok) {
+          throw new Error(`Failed to load JSON: ${response.status}`);
+        }
+        chartData = await response.json();
+        renderCoverageChart({
+          elementId: 'coverageChart',
+          policies: chartData
+        });
+        // Dropdown event listener
+        const viewSelect = document.getElementById('viewSelect');
+        if (viewSelect) {
+          viewSelect.addEventListener('change', (e) => {
+            window.currentView = e.target.value;
+            renderCoverageChart({
+              elementId: 'coverageChart',
+              policies: chartData
+            });
+          });
+        }
+        console.log('Coverage chart rendered successfully.');
+      } catch (error) {
+        console.error('Initialization error:', error);
+        document.body.insertAdjacentHTML(
+          'beforeend',
+          `<p style="color:red;">Error loading chart. Check console.</p>`
+        );
+      }
+    }
+    init();
+  </script>
+
+</body>
+</html>
