@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coverage Dashboard (Diagnostics)</title>
+
+  <!-- Try to load your existing CSS if available (non-fatal) -->
+  <link rel="stylesheet" href="/Modules/CoverageChart/CoverageChart.css" />
+  <link rel="stylesheet" href="./Modules/CoverageChart/CoverageChart.css" />
+
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 14px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    h1 { margin: 0 0 10px; font-size: 18px; }
+    #chartWrap { height: 70vh; border-radius: 12px; overflow: hidden; }
+    #coverageChartCanvas { width: 100% !important; height: 100% !important; display: block; }
+
+    .filters { display:flex; gap:10px; flex-wrap: wrap; margin: 10px 0 12px; align-items:center; }
+    select, input, button {
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.92);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    select option { background:#0b1220; color: rgba(255,255,255,0.92); }
+    button { cursor:pointer; }
+    button:hover { background: rgba(255,255,255,0.10); }
+
+    #diag {
+      margin-top: 10px;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(0,0,0,0.25);
+    }
+    .ok { color: #86efac; }
+    .bad { color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <h1>Coverage Chart</h1>
+
+  <div class="filters">
+    <select id="viewSelect">
+      <option value="carrier">Carrier View</option>
+      <option value="carrierGroup">Carrier Group View</option>
+      <option value="availability">Availability View</option>
+    </select>
+
+    <select id="yearStart"></select>
+    <select id="yearEnd"></select>
+    <button id="applyYears" type="button">Apply Years</button>
+    <button id="resetYears" type="button">Reset Years</button>
+  </div>
+
+  <div id="chartWrap">
+    <canvas id="coverageChartCanvas"></canvas>
+    <section id="chartLegend"></section>
+  </div>
+
+  <div id="diag">Loading…</div>
+
+<script type="module">
+  const diagEl = document.getElementById("diag");
+  const log = (msg, cls="") => {
+    const line = cls ? `<span class="${cls}">${escapeHtml(msg)}</span>` : escapeHtml(msg);
+    diagEl.innerHTML += (diagEl.innerHTML ? "\n" : "") + line;
+  };
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  diagEl.textContent = "";
+
+  // 1) Confirm Chart.js loaded
+  if (!window.Chart) {
+    log("Chart.js NOT found on window.Chart (CDN blocked or script failed).", "bad");
+  } else {
+    log("Chart.js loaded: window.Chart is present.", "ok");
+  }
+
+  // 2) Try import module from several likely paths
+  const modulePaths = [
+    "/Modules/CoverageChart/CoverageChart.js",
+    "./Modules/CoverageChart/CoverageChart.js",
+    "/CoverageChart/CoverageChart.js",
+    "./CoverageChart/CoverageChart.js",
+    "/Modules/CoverageChart/CoverageChart_TOWER_FIXED.js",
+    "./Modules/CoverageChart/CoverageChart_TOWER_FIXED.js",
+    "/Modules/CoverageChart/CoverageChart_TOWER.js",
+    "./Modules/CoverageChart/CoverageChart_TOWER.js",
+  ];
+
+  let ChartModule = null;
+  let modulePathUsed = null;
+
+  for (const p of modulePaths) {
+    try {
+      ChartModule = await import(p);
+      modulePathUsed = p;
+      log(`Loaded chart module: ${p}`, "ok");
+      break;
+    } catch (e) {
+      log(`Failed to import module: ${p} :: ${e?.message || e}`, "bad");
+    }
+  }
+
+  if (!ChartModule) {
+    log("No chart module could be imported. This is the #1 reason the chart won't render.", "bad");
+    log("Fix: use the correct path in the import statement, and avoid leading '/' if you're using Live Server.", "bad");
+    throw new Error("Chart module import failed.");
+  }
+
+  const { renderCoverageChart, setView, setYearCaps } = ChartModule;
+
+  if (typeof renderCoverageChart !== "function") {
+    log("Module loaded but does NOT export renderCoverageChart().", "bad");
+    throw new Error("renderCoverageChart missing.");
+  } else {
+    log("Module exports renderCoverageChart().", "ok");
+  }
+
+  // 3) Load JSON from several likely paths
+  const jsonPaths = [
+    "/data/CoveragePolicies.json",
+    "./data/CoveragePolicies.json",
+    "data/CoveragePolicies.json",
+  ];
+
+  async function fetchJsonWithFallback() {
+    for (const jp of jsonPaths) {
+      try {
+        const res = await fetch(jp, { cache: "no-store" });
+        if (!res.ok) { log(`JSON not ok (${res.status}) at ${jp}`, "bad"); continue; }
+        const data = await res.json();
+        if (!Array.isArray(data)) { log(`JSON loaded but not an array at ${jp}`, "bad"); continue; }
+        log(`Loaded policies JSON: ${jp} (${data.length.toLocaleString()} rows)`, "ok");
+        return { data, path: jp };
+      } catch (e) {
+        log(`Failed to load JSON: ${jp} :: ${e?.message || e}`, "bad");
+      }
+    }
+    throw new Error("Could not load CoveragePolicies.json from any known path.");
+  }
+
+  const { data: policies } = await fetchJsonWithFallback();
+
+  // Populate year dropdowns
+  const yearStart = document.getElementById("yearStart");
+  const yearEnd = document.getElementById("yearEnd");
+
+  const parseYear = (dateStr) => {
+    if (!dateStr) return null;
+    const s = String(dateStr);
+    const m4 = s.match(/(\d{4})/);
+    if (m4) return parseInt(m4[1], 10);
+    const m2 = s.match(/\d{1,2}-[A-Za-z]{3}-(\d{2})/);
+    if (m2) {
+      const yy = parseInt(m2[1], 10);
+      return yy > 30 ? 1900 + yy : 2000 + yy;
+    }
+    return null;
+  };
+
+  const years = [...new Set(policies.map(p => parseYear(p?.Incept)).filter(y => Number.isFinite(y)))].sort((a,b)=>a-b);
+  yearStart.innerHTML = '<option value="">— Start Year —</option>' + years.map(y => `<option value="${y}">${y}</option>`).join("");
+  yearEnd.innerHTML = '<option value="">— End Year —</option>' + years.map(y => `<option value="${y}">${y}</option>`).join("");
+
+  // Wire controls
+  document.getElementById("viewSelect").addEventListener("change", (e) => {
+    if (typeof setView === "function") setView(e.target.value);
+  });
+
+  document.getElementById("applyYears").addEventListener("click", () => {
+    const s = yearStart.value ? parseInt(yearStart.value, 10) : null;
+    const e = yearEnd.value ? parseInt(yearEnd.value, 10) : null;
+    if (typeof setYearCaps === "function") setYearCaps(s, e);
+  });
+
+  document.getElementById("resetYears").addEventListener("click", () => {
+    yearStart.value = "";
+    yearEnd.value = "";
+    if (typeof setYearCaps === "function") setYearCaps(null, null);
+  });
+
+  // Render
+  renderCoverageChart({ elementId: "coverageChartCanvas", policies });
+  log("Called renderCoverageChart(). If canvas is still blank, check console for runtime errors.", "ok");
+  log(`Module used: ${modulePathUsed}`, "ok");
+</script>
+
+</body>
+</html>
