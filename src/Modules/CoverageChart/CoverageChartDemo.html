@@ -1,199 +1,281 @@
+<!-- Modules/CoverageChart/CoverageChartDemo.html -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Coverage Dashboard (Diagnostics)</title>
-
-  <!-- Try to load your existing CSS if available (non-fatal) -->
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Coverage Chart Demo</title>
   <link rel="stylesheet" href="/Modules/CoverageChart/CoverageChart.css" />
-  <link rel="stylesheet" href="./Modules/CoverageChart/CoverageChart.css" />
-
-  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
-  <style>
-    :root { color-scheme: dark; }
-    body { margin: 14px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    h1 { margin: 0 0 10px; font-size: 18px; }
-    #chartWrap { height: 70vh; border-radius: 12px; overflow: hidden; }
-    #coverageChartCanvas { width: 100% !important; height: 100% !important; display: block; }
-
-    .filters { display:flex; gap:10px; flex-wrap: wrap; margin: 10px 0 12px; align-items:center; }
-    select, input, button {
-      background: rgba(255,255,255,0.06);
-      color: rgba(255,255,255,0.92);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 10px;
-      padding: 10px 12px;
-      font-size: 14px;
-    }
-    select option { background:#0b1220; color: rgba(255,255,255,0.92); }
-    button { cursor:pointer; }
-    button:hover { background: rgba(255,255,255,0.10); }
-
-    #diag {
-      margin-top: 10px;
-      white-space: pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-      font-size: 12px;
-      padding: 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(0,0,0,0.25);
-    }
-    .ok { color: #86efac; }
-    .bad { color: #fca5a5; }
-  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
-  <h1>Coverage Chart</h1>
+  <div class="page">
+    <header class="topbar">
+      <div class="title">
+        <h1>Coverage Tower</h1>
+        <div class="subtitle">Floating tower (per year) with Carrier / Carrier Group / Availability views</div>
+        <div class="note">Carrier view colors are by Carrier Group (same group shares the same color).</div>
+      </div>
 
-  <div class="filters">
-    <select id="viewSelect">
-      <option value="carrier">Carrier View</option>
-      <option value="carrierGroup">Carrier Group View</option>
-      <option value="availability">Availability View</option>
-    </select>
+      <div class="controls">
+        <section class="controlGroup controlGroup--compact" aria-label="View Controls">
+          <div class="controlGroupHeader">
+            <h2>View</h2>
+          </div>
+          <div class="controlGrid controlGrid--1">
+            <div class="controlBlock">
+              <label for="viewSelect">Display Mode</label>
+              <select id="viewSelect">
+                <option value="carrier">Carrier</option>
+                <option value="carrierGroup">Carrier Group</option>
+                <option value="availability">Availability</option>
+              </select>
+            </div>
+          </div>
+        </section>
 
-    <select id="yearStart"></select>
-    <select id="yearEnd"></select>
-    <button id="applyYears" type="button">Apply Years</button>
-    <button id="resetYears" type="button">Reset Years</button>
+        <section class="controlGroup" aria-label="Year Controls">
+          <div class="controlGroupHeader">
+            <h2>Years</h2>
+            <button type="button" id="resetYearsBtn" class="ghostBtn">Reset</button>
+          </div>
+          <div class="controlGrid controlGrid--2">
+            <div class="controlBlock">
+              <label for="startYearSelect">Start Year</label>
+              <select id="startYearSelect">
+                <option value="">All</option>
+              </select>
+            </div>
+            <div class="controlBlock">
+              <label for="endYearSelect">End Year</label>
+              <select id="endYearSelect">
+                <option value="">All</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section class="controlGroup" aria-label="Zoom Controls">
+          <div class="controlGroupHeader">
+            <h2>Vertical Zoom</h2>
+            <button type="button" id="resetZoomBtn" class="ghostBtn">Reset</button>
+          </div>
+          <div class="controlGrid controlGrid--2">
+            <div class="controlBlock">
+              <label for="zoomMinInput">Min ($)</label>
+              <input id="zoomMinInput" type="text" inputmode="numeric" placeholder="0" />
+            </div>
+            <div class="controlBlock">
+              <label for="zoomMaxInput">Max ($)</label>
+              <input id="zoomMaxInput" type="text" inputmode="numeric" placeholder="Auto" />
+            </div>
+          </div>
+        </section>
+
+        <section class="controlGroup" aria-label="Focus Filters">
+          <div class="controlGroupHeader">
+            <h2>Focus Filters</h2>
+            <button type="button" id="resetEntityFiltersBtn" class="ghostBtn">Reset</button>
+          </div>
+          <div class="controlGrid controlGrid--2">
+            <div class="controlBlock">
+              <label for="carrierDropdown">Carrier (Multi)</label>
+              <details id="carrierDropdown" class="multiDropdown">
+                <summary class="multiDropdownSummary">
+                  <span id="carrierDropdownLabel">All carriers</span>
+                </summary>
+                <div id="carrierDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier filters"></div>
+              </details>
+            </div>
+            <div class="controlBlock">
+              <label for="carrierGroupDropdown">Carrier Group (Multi)</label>
+              <details id="carrierGroupDropdown" class="multiDropdown">
+                <summary class="multiDropdownSummary">
+                  <span id="carrierGroupDropdownLabel">All carrier groups</span>
+                </summary>
+                <div id="carrierGroupDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier group filters"></div>
+              </details>
+            </div>
+          </div>
+        </section>
+      </div>
+    </header>
+
+    <main class="content">
+      <div class="chartWrap">
+        <div class="chartHint">Scroll to pan. Use <kbd>Shift</kbd> + wheel to scroll horizontally. Use <kbd>Ctrl/Cmd</kbd> + wheel to zoom the x-axis.</div>
+        <div class="chartViewport">
+          <div class="chartSurface">
+            <canvas id="coverageCanvas"></canvas>
+          </div>
+        </div>
+      </div>
+      <pre id="errorBox" class="error" style="display:none;"></pre>
+    </main>
   </div>
 
-  <div id="chartWrap">
-    <canvas id="coverageChartCanvas"></canvas>
-    <section id="chartLegend"></section>
-  </div>
+  <script type="module">
+    import {
+      renderCoverageChart,
+      setView,
+      getFilterOptions,
+      getYearBounds,
+      setYearRange,
+      resetYearRange,
+      setEntityFilters,
+      resetEntityFilters,
+      setZoomRange,
+      resetZoomRange
+    } from "/Modules/CoverageChart/CoverageChart.js";
 
-  <div id="diag">Loading…</div>
-
-<script type="module">
-  const diagEl = document.getElementById("diag");
-  const log = (msg, cls="") => {
-    const line = cls ? `<span class="${cls}">${escapeHtml(msg)}</span>` : escapeHtml(msg);
-    diagEl.innerHTML += (diagEl.innerHTML ? "\n" : "") + line;
-  };
-  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-  diagEl.textContent = "";
-
-  // 1) Confirm Chart.js loaded
-  if (!window.Chart) {
-    log("Chart.js NOT found on window.Chart (CDN blocked or script failed).", "bad");
-  } else {
-    log("Chart.js loaded: window.Chart is present.", "ok");
-  }
-
-  // 2) Try import module from several likely paths
-  const modulePaths = [
-    "/Modules/CoverageChart/CoverageChart.js",
-    "./Modules/CoverageChart/CoverageChart.js",
-    "/CoverageChart/CoverageChart.js",
-    "./CoverageChart/CoverageChart.js",
-    "/Modules/CoverageChart/CoverageChart_TOWER_FIXED.js",
-    "./Modules/CoverageChart/CoverageChart_TOWER_FIXED.js",
-    "/Modules/CoverageChart/CoverageChart_TOWER.js",
-    "./Modules/CoverageChart/CoverageChart_TOWER.js",
-  ];
-
-  let ChartModule = null;
-  let modulePathUsed = null;
-
-  for (const p of modulePaths) {
-    try {
-      ChartModule = await import(p);
-      modulePathUsed = p;
-      log(`Loaded chart module: ${p}`, "ok");
-      break;
-    } catch (e) {
-      log(`Failed to import module: ${p} :: ${e?.message || e}`, "bad");
+    function showError(err) {
+      const box = document.getElementById("errorBox");
+      box.style.display = "block";
+      box.textContent =
+        "ERROR:\\n" + (err?.stack || err?.message || String(err)) +
+        "\\n\\nQuick checks:" +
+        "\\n- Chart.js loaded (CDN)" +
+        "\\n- CSV URLs correct (PolicyLimits, PolicyDates, Policy, Carrier, CarrierGroup)" +
+        "\\n- Server is serving /data and /Modules";
     }
-  }
 
-  if (!ChartModule) {
-    log("No chart module could be imported. This is the #1 reason the chart won't render.", "bad");
-    log("Fix: use the correct path in the import statement, and avoid leading '/' if you're using Live Server.", "bad");
-    throw new Error("Chart module import failed.");
-  }
-
-  const { renderCoverageChart, setView, setYearCaps } = ChartModule;
-
-  if (typeof renderCoverageChart !== "function") {
-    log("Module loaded but does NOT export renderCoverageChart().", "bad");
-    throw new Error("renderCoverageChart missing.");
-  } else {
-    log("Module exports renderCoverageChart().", "ok");
-  }
-
-  // 3) Load JSON from several likely paths
-  const jsonPaths = [
-    "/data/CoveragePolicies.json",
-    "./data/CoveragePolicies.json",
-    "data/CoveragePolicies.json",
-  ];
-
-  async function fetchJsonWithFallback() {
-    for (const jp of jsonPaths) {
+    async function init() {
       try {
-        const res = await fetch(jp, { cache: "no-store" });
-        if (!res.ok) { log(`JSON not ok (${res.status}) at ${jp}`, "bad"); continue; }
-        const data = await res.json();
-        if (!Array.isArray(data)) { log(`JSON loaded but not an array at ${jp}`, "bad"); continue; }
-        log(`Loaded policies JSON: ${jp} (${data.length.toLocaleString()} rows)`, "ok");
-        return { data, path: jp };
+        await renderCoverageChart({
+          canvasId: "coverageCanvas",
+          csvUrl: "/data/OriginalFiles/tblPolicyLimits.csv",
+          initialView: "carrier",
+          barThickness: "flex",
+          categorySpacing: 1.0,
+          tooltipMaxParticipants: 50
+        });
+
+        const sel = document.getElementById("viewSelect");
+        sel.addEventListener("change", (e) => setView(e.target.value));
+
+        const startYearSelect = document.getElementById("startYearSelect");
+        const endYearSelect = document.getElementById("endYearSelect");
+        const resetYearsBtn = document.getElementById("resetYearsBtn");
+        const carrierDropdownMenu = document.getElementById("carrierDropdownMenu");
+        const carrierGroupDropdownMenu = document.getElementById("carrierGroupDropdownMenu");
+        const carrierDropdownLabel = document.getElementById("carrierDropdownLabel");
+        const carrierGroupDropdownLabel = document.getElementById("carrierGroupDropdownLabel");
+        const resetEntityFiltersBtn = document.getElementById("resetEntityFiltersBtn");
+        const zoomMinInput = document.getElementById("zoomMinInput");
+        const zoomMaxInput = document.getElementById("zoomMaxInput");
+        const resetZoomBtn = document.getElementById("resetZoomBtn");
+
+        const bounds = getYearBounds();
+        if (bounds.minYear !== null && bounds.maxYear !== null) {
+          for (let year = bounds.minYear; year <= bounds.maxYear; year++) {
+            const a = document.createElement("option");
+            a.value = String(year);
+            a.textContent = String(year);
+            startYearSelect.appendChild(a);
+
+            const b = document.createElement("option");
+            b.value = String(year);
+            b.textContent = String(year);
+            endYearSelect.appendChild(b);
+          }
+        }
+
+        const filterOptions = getFilterOptions();
+        function buildCheckboxMenu(container, values, inputName) {
+          container.innerHTML = "";
+          for (const value of values) {
+            const row = document.createElement("label");
+            row.className = "multiOption";
+
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.name = inputName;
+            cb.value = value;
+
+            const text = document.createElement("span");
+            text.textContent = value;
+
+            row.appendChild(cb);
+            row.appendChild(text);
+            container.appendChild(row);
+          }
+        }
+
+        buildCheckboxMenu(carrierDropdownMenu, filterOptions.carriers, "carrier_filter");
+        buildCheckboxMenu(carrierGroupDropdownMenu, filterOptions.carrierGroups, "carrier_group_filter");
+
+        function applyYearFilters() {
+          const start = startYearSelect.value === "" ? null : Number(startYearSelect.value);
+          const end = endYearSelect.value === "" ? null : Number(endYearSelect.value);
+          setYearRange(start, end);
+        }
+
+        function applyZoomFilters() {
+          setZoomRange(zoomMinInput.value, zoomMaxInput.value);
+        }
+
+        function selectedValuesFromCheckboxMenu(container) {
+          return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+        }
+
+        function updateDropdownLabel(labelEl, values, allText, singularNoun) {
+          if (!values.length) {
+            labelEl.textContent = allText;
+            return;
+          }
+          if (values.length === 1) {
+            labelEl.textContent = values[0];
+            return;
+          }
+          labelEl.textContent = `${values.length} ${singularNoun}s selected`;
+        }
+
+        function applyEntityFilters() {
+          const carriers = selectedValuesFromCheckboxMenu(carrierDropdownMenu);
+          const carrierGroups = selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu);
+          updateDropdownLabel(carrierDropdownLabel, carriers, "All carriers", "carrier");
+          updateDropdownLabel(carrierGroupDropdownLabel, carrierGroups, "All carrier groups", "group");
+          setEntityFilters({
+            carriers,
+            carrierGroups
+          });
+        }
+
+        startYearSelect.addEventListener("change", applyYearFilters);
+        endYearSelect.addEventListener("change", applyYearFilters);
+
+        resetYearsBtn.addEventListener("click", () => {
+          startYearSelect.value = "";
+          endYearSelect.value = "";
+          resetYearRange();
+        });
+
+        zoomMinInput.addEventListener("change", applyZoomFilters);
+        zoomMaxInput.addEventListener("change", applyZoomFilters);
+        zoomMinInput.addEventListener("blur", applyZoomFilters);
+        zoomMaxInput.addEventListener("blur", applyZoomFilters);
+        carrierDropdownMenu.addEventListener("change", applyEntityFilters);
+        carrierGroupDropdownMenu.addEventListener("change", applyEntityFilters);
+
+        resetZoomBtn.addEventListener("click", () => {
+          zoomMinInput.value = "";
+          zoomMaxInput.value = "";
+          resetZoomRange();
+        });
+
+        resetEntityFiltersBtn.addEventListener("click", () => {
+          for (const cb of carrierDropdownMenu.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
+          for (const cb of carrierGroupDropdownMenu.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
+          updateDropdownLabel(carrierDropdownLabel, [], "All carriers", "carrier");
+          updateDropdownLabel(carrierGroupDropdownLabel, [], "All carrier groups", "group");
+          resetEntityFilters();
+        });
       } catch (e) {
-        log(`Failed to load JSON: ${jp} :: ${e?.message || e}`, "bad");
+        showError(e);
       }
     }
-    throw new Error("Could not load CoveragePolicies.json from any known path.");
-  }
 
-  const { data: policies } = await fetchJsonWithFallback();
-
-  // Populate year dropdowns
-  const yearStart = document.getElementById("yearStart");
-  const yearEnd = document.getElementById("yearEnd");
-
-  const parseYear = (dateStr) => {
-    if (!dateStr) return null;
-    const s = String(dateStr);
-    const m4 = s.match(/(\d{4})/);
-    if (m4) return parseInt(m4[1], 10);
-    const m2 = s.match(/\d{1,2}-[A-Za-z]{3}-(\d{2})/);
-    if (m2) {
-      const yy = parseInt(m2[1], 10);
-      return yy > 30 ? 1900 + yy : 2000 + yy;
-    }
-    return null;
-  };
-
-  const years = [...new Set(policies.map(p => parseYear(p?.Incept)).filter(y => Number.isFinite(y)))].sort((a,b)=>a-b);
-  yearStart.innerHTML = '<option value="">— Start Year —</option>' + years.map(y => `<option value="${y}">${y}</option>`).join("");
-  yearEnd.innerHTML = '<option value="">— End Year —</option>' + years.map(y => `<option value="${y}">${y}</option>`).join("");
-
-  // Wire controls
-  document.getElementById("viewSelect").addEventListener("change", (e) => {
-    if (typeof setView === "function") setView(e.target.value);
-  });
-
-  document.getElementById("applyYears").addEventListener("click", () => {
-    const s = yearStart.value ? parseInt(yearStart.value, 10) : null;
-    const e = yearEnd.value ? parseInt(yearEnd.value, 10) : null;
-    if (typeof setYearCaps === "function") setYearCaps(s, e);
-  });
-
-  document.getElementById("resetYears").addEventListener("click", () => {
-    yearStart.value = "";
-    yearEnd.value = "";
-    if (typeof setYearCaps === "function") setYearCaps(null, null);
-  });
-
-  // Render
-  renderCoverageChart({ elementId: "coverageChartCanvas", policies });
-  log("Called renderCoverageChart(). If canvas is still blank, check console for runtime errors.", "ok");
-  log(`Module used: ${modulePathUsed}`, "ok");
-</script>
-
+    init();
+  </script>
 </body>
 </html>

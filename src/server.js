@@ -1,17 +1,26 @@
-const express = require("express");
-const path = require("path");
+// src/server.js
+import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
 
-// Serve everything inside /src as web root
-app.use(express.static(path.join(__dirname, "src")));
+// If server.js is inside /src, don't append another /src
+const SRC_DIR =
+  path.basename(__dirname) === "src"
+    ? __dirname
+    : path.join(__dirname, "src");
 
-// Load demo at root URL
+// Serve static files from /src
+app.use(express.static(SRC_DIR));
+
+// Home route -> coverage chart demo (served from /src/Modules/...)
 app.get("/", (req, res) => {
-  res.sendFile(
-    path.join(__dirname, "src", "Modules", "CoverageChart", "CoverageChartDemo.html")
-  );
+  res.sendFile(path.join(SRC_DIR, "Modules", "CoverageChart", "CoverageChartDemo.html"));
 });
 
 app.listen(PORT, () => {

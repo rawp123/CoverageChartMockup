@@ -1,13 +1,50 @@
+/* Modules/CoverageChart/CoverageChart.css */
+
+/* =========================
+   THEME VARIABLES
+   Default = NIGHT
+========================= */
 :root{
+  color-scheme: dark;
+
   --bg0:#0b0f15;
   --bg1:#0f1720;
+
   --panel: rgba(255,255,255,0.06);
-  --panel-2: rgba(255,255,255,0.08);
   --border: rgba(255,255,255,0.14);
+
   --text: rgba(255,255,255,0.92);
   --muted: rgba(255,255,255,0.72);
-  --shadow: 0 14px 40px rgba(0,0,0,0.40);
+
   --radius: 14px;
+
+  /* Form-control menu colors (helps dropdown list) */
+  --menu-bg: #0f1720;
+  --menu-fg: rgba(255,255,255,0.92);
+  --menu-hover: #111827;
+  --menu-checked: #1f2937;
+}
+
+/* =========================
+   DAY MODE OVERRIDES
+   Activated by: <html data-theme="light">
+========================= */
+:root[data-theme="light"]{
+  color-scheme: light;
+
+  --bg0:#f4f6fb;
+  --bg1:#ffffff;
+
+  --panel: rgba(0,0,0,0.04);
+  --border: rgba(0,0,0,0.14);
+
+  --text: rgba(0,0,0,0.88);
+  --muted: rgba(0,0,0,0.55);
+
+  --menu-bg: #ffffff;
+  --menu-fg: rgba(0,0,0,0.88);
+  --menu-hover: #eef2ff;
+  --menu-checked: #e5e7eb;
 }
 
 *{ box-sizing:border-box; }
@@ -15,178 +52,332 @@
 body{
   margin:0;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", sans-serif;
-  background: radial-gradient(1200px 700px at 50% 0%, #1f2937 0%, var(--bg1) 45%, var(--bg0) 100%);
+
+  /* Works in modern Chromium. If a browser doesn't support color-mix, it will just ignore it. */
+  background: radial-gradient(1200px 700px at 50% 0%,
+    color-mix(in oklab, var(--bg1) 75%, #1f2937 25%) 0%,
+    var(--bg1) 45%,
+    var(--bg0) 100%
+  );
+
   color: var(--text);
 }
 
-.page{ min-height: 100vh; padding: 28px 24px 42px; }
+.page{ min-height:100vh; display:flex; flex-direction:column; }
 
-.shell{ width: min(1400px, 96vw); margin: 0 auto; }
+.topbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding:16px 18px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,0,0,0.15);
+}
 
-.page-title{
-  margin: 0 0 18px;
-  font-size: 44px;
-  line-height: 1.1;
-  letter-spacing: 0.2px;
-  font-weight: 750;
+:root[data-theme="light"] .topbar{
+  background: rgba(255,255,255,0.7);
+}
+
+.title{
+  min-width: 260px;
+  flex: 1 1 320px;
+}
+.title h1{ margin:0; font-size:18px; font-weight:700; letter-spacing:0.01em; }
+.subtitle{ margin-top:5px; font-size:12px; color:var(--muted); line-height:1.35; }
+.note{
+  margin-top:8px;
+  font-size:11px;
+  color: color-mix(in oklab, var(--muted) 85%, var(--text) 15%);
+  line-height:1.35;
 }
 
 .controls{
-  width: 100%;
   display:flex;
   flex-wrap: wrap;
-  gap: 14px;
-  align-items: flex-end;
-  padding: 14px;
+  gap: 10px;
+  align-items: stretch;
+  justify-content: flex-end;
+  min-width: min(100%, 760px);
+  flex: 2 1 760px;
+}
+
+.controls label{
+  font-size:12px;
+  color: var(--text);
+  margin-bottom:4px;
+  display:block;
+}
+
+.controlGroup{
+  background: linear-gradient(
+    180deg,
+    rgba(255,255,255,0.055) 0%,
+    rgba(255,255,255,0.03) 100%
+  );
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+  min-width: 240px;
+  flex: 1 1 290px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.controlGroup[aria-label="Focus Filters"]{
+  flex: 2 1 520px;
+}
+
+.controlGroup--compact{
+  flex: 0 1 220px;
+  min-width: 220px;
+}
+
+.controlGroupHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.controlGroupHeader h2{
+  margin:0;
+  font-size:10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.controlGrid{
+  display:grid;
+  gap:8px;
+}
+
+.controlGrid--1{
+  grid-template-columns: 1fr;
+}
+
+.controlGrid--2{
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+}
+
+.controlBlock{
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+}
+
+/* Buttons */
+.controls button{
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  outline: none;
+  cursor: pointer;
+  min-height: 34px;
+}
+.controls button:hover{ filter: brightness(1.05); }
+
+.controls .ghostBtn{
+  min-height: 0;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1;
+  background: rgba(255,255,255,0.05);
+}
+
+/* Select (closed state) */
+.controls select,
+.controls input{
+  color-scheme: inherit; /* important: lets it follow dark/light mode */
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  outline: none;
+  min-height: 34px;
+  width: 100%;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.controls input::placeholder{ color: var(--muted); }
+
+.multiDropdown{
+  position: relative;
+}
+
+.multiDropdownSummary{
+  list-style: none;
+  user-select: none;
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.multiDropdownSummary::-webkit-details-marker{
+  display: none;
+}
+
+.multiDropdownSummary::after{
+  content: "▾";
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.multiDropdown[open] .multiDropdownSummary{
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.multiDropdownMenu{
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 170px;
+  overflow: auto;
+  padding: 3px;
+  background: color-mix(in oklab, var(--bg1) 92%, black 8%);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 12px 24px rgba(0,0,0,0.28);
+}
+
+.multiOption{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text);
+  line-height: 1.15;
+  font-size: 11px;
+}
+
+.multiOption:hover{
+  background: rgba(255,255,255,0.05);
+}
+
+.multiOption input{
+  margin: 0;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  accent-color: #60a5fa;
+}
+
+.multiOption span{
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dropdown list (open state) */
+.controls select option{
+  background-color: var(--menu-bg);
+  color: var(--menu-fg);
+}
+.controls select option:hover{
+  background-color: var(--menu-hover);
+}
+.controls select option:checked{
+  background-color: var(--menu-checked);
+}
+
+.content{ padding:16px; }
+
+.chartWrap{
+  height: 62vh;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(6px);
-}
-
-.control{ display:flex; flex-direction: column; gap: 8px; }
-.control-wide{ min-width: 520px; flex: 1 1 520px; }
-
-.control label{
-  font-weight: 650;
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.row{ display:flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-
-select, input, button{
-  height: 40px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 650;
-  padding: 0 12px;
-  outline: none;
-}
-
-select{ min-width: 240px; }
-
-input{ width: 160px; }
-
-button{
-  min-width: 96px;
-  cursor: pointer;
-  transition: transform 0.06s ease, background 0.2s ease, border-color 0.2s ease;
-}
-
-button:hover{ background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.22); }
-button:active{ transform: translateY(1px); }
-
-.chart-card{
-  margin-top: 18px;
-  background: #ffffff;
-  border-radius: var(--radius);
-  border: 1px solid rgba(17,24,39,0.12);
-  box-shadow: var(--shadow);
-  padding: 14px;
-  height: 620px;
-}
-
-#CoverageChart{ width: 100% !important; height: 100% !important; display:block; }
-
-.error{
-  display:none;
-  margin-top: 14px;
-  padding: 12px 14px;
-  border: 1px solid rgba(155,44,44,0.35);
-  background: rgba(155,44,44,0.10);
-  color: #ffd7d7;
-  border-radius: 10px;
-  white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-}
-
-/* Legend (generated by JS) */
-#chartLegend{
-  width: min(1300px, 94vw);
-  margin: 0 auto 34px;
-  color: rgba(255,255,255,0.92);
-  font-size: 12px;
-}
-#chartLegend .legend-wrap{
-  display:flex;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  align-items: center;
-  padding: 10px 2px 0;
-}
-#chartLegend .legend-item{
-  display:flex;
-  align-items:center;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  max-width: 260px;
-}
-#chartLegend .swatch{
-  width: 12px;
-  height: 12px;
-  border-radius: 4px;
-  border: 1px solid rgba(255,255,255,0.25);
-  flex: 0 0 auto;
-}
-#chartLegend .legend-label{
-  overflow:hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-#chartLegend .legend-more{
-  opacity: 0.8;
-  font-style: italic;
-}
-/* Make the chart area a fixed height */
-#chartWrap {
-  height: 70vh;        /* or 600px */
-  max-height: 900px;   /* optional */
+  min-height: 300px;
 }
 
-/* Make the canvas actually fill chartWrap */
-#coverageChartCanvas {
-  width: 100% !important;
-  height: 100% !important;
+.chartHint{
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.chartHint kbd{
+  font: inherit;
+  color: var(--text);
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+.chartViewport{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  border-radius: 10px;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.chartSurface{
+  position: relative;
+  width: 100%;
+  min-width: 100%;
+  height: 100%;
+  min-height: 100%;
+}
+
+.chartSurface canvas{
   display: block;
 }
-/* ===== Dropdown + control legibility (dark UI) ===== */
-:root {
-  color-scheme: dark; /* tells the browser to render native controls in dark mode */
+
+@media (max-width: 900px){
+  .controls{
+    min-width: 100%;
+    flex-basis: 100%;
+    justify-content: stretch;
+  }
+
+  .controlGroup,
+  .controlGroup--compact{
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
+
+  .controlGrid--2{
+    grid-template-columns: 1fr;
+  }
 }
 
-.controls select,
-.controls input,
-.controls button {
-  background: rgba(255,255,255,0.06);
-  color: rgba(255,255,255,0.92);
-  border: 1px solid rgba(255,255,255,0.12);
-}
-
-.controls select:focus,
-.controls input:focus {
-  outline: none;
-  border-color: rgba(255,255,255,0.26);
-  box-shadow: 0 0 0 3px rgba(255,255,255,0.08);
-}
-
-/* Dropdown menu items (works in Chrome/Edge; other browsers vary) */
-.controls select option {
-  background: #0b1220; /* dark menu */
-  color: rgba(255,255,255,0.92);
-}
-
-/* Prevent “washed out” hover/disabled text */
-.controls select:hover,
-.controls button:hover {
-  background: rgba(255,255,255,0.10);
-}
-
-.controls select:disabled,
-.controls input:disabled {
-  opacity: 0.55;
+.error{
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255,0,0,0.12);
+  border: 1px solid rgba(255,0,0,0.35);
+  border-radius: 12px;
+  white-space: pre-wrap;
 }
