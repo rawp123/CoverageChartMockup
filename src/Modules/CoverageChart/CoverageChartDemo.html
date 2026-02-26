@@ -18,13 +18,10 @@
       </div>
 
       <div class="controls">
-        <section class="controlGroup controlGroup--compact" aria-label="View Controls">
-          <div class="controlGroupHeader">
-            <h2>View</h2>
-          </div>
-          <div class="controlGrid controlGrid--1">
+        <div class="controlBar" aria-label="Primary Controls">
+          <div class="controlPanel controlPanel--view">
             <div class="controlBlock">
-              <label for="viewSelect">Display Mode</label>
+              <label for="viewSelect">View</label>
               <select id="viewSelect">
                 <option value="carrier">Carrier</option>
                 <option value="carrierGroup">Carrier Group</option>
@@ -32,52 +29,44 @@
               </select>
             </div>
           </div>
-        </section>
 
-        <section class="controlGroup" aria-label="Year Controls">
-          <div class="controlGroupHeader">
-            <h2>Years</h2>
-            <button type="button" id="resetYearsBtn" class="ghostBtn">Reset</button>
-          </div>
-          <div class="controlGrid controlGrid--2">
-            <div class="controlBlock">
-              <label for="startYearSelect">Start Year</label>
-              <select id="startYearSelect">
-                <option value="">All</option>
-              </select>
-            </div>
-            <div class="controlBlock">
-              <label for="endYearSelect">End Year</label>
-              <select id="endYearSelect">
-                <option value="">All</option>
-              </select>
+          <div class="controlPanel controlPanel--years">
+            <div class="inlinePair">
+              <div class="controlBlock">
+                <label for="startYearSelect">Start Year</label>
+                <select id="startYearSelect">
+                  <option value="">All</option>
+                </select>
+              </div>
+              <div class="controlBlock">
+                <label for="endYearSelect">End Year</label>
+                <select id="endYearSelect">
+                  <option value="">All</option>
+                </select>
+              </div>
             </div>
           </div>
-        </section>
 
-        <section class="controlGroup" aria-label="Zoom Controls">
-          <div class="controlGroupHeader">
-            <h2>Vertical Zoom</h2>
-            <button type="button" id="resetZoomBtn" class="ghostBtn">Reset</button>
-          </div>
-          <div class="controlGrid controlGrid--2">
-            <div class="controlBlock">
-              <label for="zoomMinInput">Min ($)</label>
-              <input id="zoomMinInput" type="text" inputmode="numeric" placeholder="0" />
-            </div>
-            <div class="controlBlock">
-              <label for="zoomMaxInput">Max ($)</label>
-              <input id="zoomMaxInput" type="text" inputmode="numeric" placeholder="Auto" />
+          <div class="controlPanel controlPanel--zoom">
+            <div class="inlinePair">
+              <div class="controlBlock">
+                <label for="zoomMinInput">Zoom Min ($)</label>
+                <input id="zoomMinInput" type="text" inputmode="numeric" placeholder="0" />
+              </div>
+              <div class="controlBlock">
+                <label for="zoomMaxInput">Zoom Max ($)</label>
+                <input id="zoomMaxInput" type="text" inputmode="numeric" placeholder="Auto" />
+              </div>
             </div>
           </div>
-        </section>
 
-        <section class="controlGroup" aria-label="Focus Filters">
-          <div class="controlGroupHeader">
-            <h2>Focus Filters</h2>
-            <button type="button" id="resetEntityFiltersBtn" class="ghostBtn">Reset</button>
+          <div class="controlPanel controlPanel--reset">
+            <button type="button" id="resetAll" class="primaryBtn">Reset All</button>
           </div>
-          <div class="controlGrid controlGrid--2">
+        </div>
+
+        <div class="filterBar" aria-label="Focus Filters">
+          <div class="controlPanel">
             <div class="controlBlock">
               <label for="carrierDropdown">Carrier (Multi)</label>
               <details id="carrierDropdown" class="multiDropdown">
@@ -87,6 +76,9 @@
                 <div id="carrierDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier filters"></div>
               </details>
             </div>
+          </div>
+
+          <div class="controlPanel">
             <div class="controlBlock">
               <label for="carrierGroupDropdown">Carrier Group (Multi)</label>
               <details id="carrierGroupDropdown" class="multiDropdown">
@@ -97,7 +89,7 @@
               </details>
             </div>
           </div>
-        </section>
+        </div>
       </div>
     </header>
 
@@ -155,15 +147,13 @@
 
         const startYearSelect = document.getElementById("startYearSelect");
         const endYearSelect = document.getElementById("endYearSelect");
-        const resetYearsBtn = document.getElementById("resetYearsBtn");
         const carrierDropdownMenu = document.getElementById("carrierDropdownMenu");
         const carrierGroupDropdownMenu = document.getElementById("carrierGroupDropdownMenu");
         const carrierDropdownLabel = document.getElementById("carrierDropdownLabel");
         const carrierGroupDropdownLabel = document.getElementById("carrierGroupDropdownLabel");
-        const resetEntityFiltersBtn = document.getElementById("resetEntityFiltersBtn");
         const zoomMinInput = document.getElementById("zoomMinInput");
         const zoomMaxInput = document.getElementById("zoomMaxInput");
-        const resetZoomBtn = document.getElementById("resetZoomBtn");
+        const resetAllBtn = document.getElementById("resetAll");
 
         const bounds = getYearBounds();
         if (bounds.minYear !== null && bounds.maxYear !== null) {
@@ -205,9 +195,26 @@
         buildCheckboxMenu(carrierGroupDropdownMenu, filterOptions.carrierGroups, "carrier_group_filter");
 
         function applyYearFilters() {
-          const start = startYearSelect.value === "" ? null : Number(startYearSelect.value);
-          const end = endYearSelect.value === "" ? null : Number(endYearSelect.value);
-          setYearRange(start, end);
+          const toYear = (v) => {
+            if (v === null || v === undefined || String(v).trim() === "") return null;
+            const n = Number.parseInt(String(v), 10);
+            return Number.isFinite(n) ? n : null;
+          };
+          const start = toYear(startYearSelect.value);
+          const end = toYear(endYearSelect.value);
+          const boundsNow = getYearBounds();
+          const minBound = Number.isFinite(boundsNow.minYear) ? boundsNow.minYear : null;
+          const maxBound = Number.isFinite(boundsNow.maxYear) ? boundsNow.maxYear : null;
+
+          // Always pass concrete bounds to avoid any open-ended interpretation drift.
+          const effectiveStart = start !== null ? start : minBound;
+          const effectiveEnd = end !== null ? end : maxBound;
+
+          if (effectiveStart === null && effectiveEnd === null) {
+            resetYearRange();
+            return;
+          }
+          setYearRange(effectiveStart, effectiveEnd);
         }
 
         function applyZoomFilters() {
@@ -241,14 +248,12 @@
           });
         }
 
+        startYearSelect.addEventListener("input", applyYearFilters);
         startYearSelect.addEventListener("change", applyYearFilters);
+        startYearSelect.addEventListener("blur", applyYearFilters);
+        endYearSelect.addEventListener("input", applyYearFilters);
         endYearSelect.addEventListener("change", applyYearFilters);
-
-        resetYearsBtn.addEventListener("click", () => {
-          startYearSelect.value = "";
-          endYearSelect.value = "";
-          resetYearRange();
-        });
+        endYearSelect.addEventListener("blur", applyYearFilters);
 
         zoomMinInput.addEventListener("change", applyZoomFilters);
         zoomMaxInput.addEventListener("change", applyZoomFilters);
@@ -257,17 +262,21 @@
         carrierDropdownMenu.addEventListener("change", applyEntityFilters);
         carrierGroupDropdownMenu.addEventListener("change", applyEntityFilters);
 
-        resetZoomBtn.addEventListener("click", () => {
-          zoomMinInput.value = "";
-          zoomMaxInput.value = "";
-          resetZoomRange();
-        });
-
-        resetEntityFiltersBtn.addEventListener("click", () => {
+        function resetEntityFilterUI() {
           for (const cb of carrierDropdownMenu.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
           for (const cb of carrierGroupDropdownMenu.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
           updateDropdownLabel(carrierDropdownLabel, [], "All carriers", "carrier");
           updateDropdownLabel(carrierGroupDropdownLabel, [], "All carrier groups", "group");
+        }
+
+        resetAllBtn.addEventListener("click", () => {
+          startYearSelect.value = "";
+          endYearSelect.value = "";
+          zoomMinInput.value = "";
+          zoomMaxInput.value = "";
+          resetEntityFilterUI();
+          resetYearRange();
+          resetZoomRange();
           resetEntityFilters();
         });
       } catch (e) {
