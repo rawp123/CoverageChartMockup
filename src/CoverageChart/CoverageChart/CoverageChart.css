@@ -1,0 +1,111 @@
+:root{
+  --am-maroon:#500000;
+  --am-maroon-2:#6B1F1F;
+  --ink:#111827;
+  --slate:#374151;
+  --muted:#6B7280;
+  --panel:#ffffff;
+  --border:rgba(17,24,39,0.12);
+  --shadow:0 10px 30px rgba(0,0,0,0.18);
+  --radius:14px;
+}
+
+*{ box-sizing:border-box; }
+
+body{
+  margin:0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", sans-serif;
+  background: radial-gradient(1200px 600px at 50% 0%, #6B1F1F 0%, var(--am-maroon) 40%, #3d0000 100%);
+  color:#fff;
+}
+
+h1{
+  margin: 28px 0 10px;
+  text-align:center;
+  font-size: 40px;
+  letter-spacing: 0.2px;
+  font-weight: 700;
+}
+
+#controls{
+  width: min(1200px, 92vw);
+  margin: 8px auto 16px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+#controls label{
+  font-weight: 600;
+  color: rgba(255,255,255,0.92);
+}
+
+select, button{
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.35);
+  background: rgba(255,255,255,0.10);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+}
+
+select{
+  min-width: 210px;
+  backdrop-filter: blur(6px);
+}
+
+button{
+  min-width: 150px;
+  cursor: pointer;
+  transition: transform 0.06s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+button:hover{
+  background: rgba(255,255,255,0.16);
+  border-color: rgba(255,255,255,0.55);
+}
+
+button:active{
+  transform: translateY(1px);
+}
+
+button:disabled{
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#chart-container{
+  width: min(1300px, 94vw);
+  margin: 0 auto 34px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 18px 8px;
+  box-shadow: var(--shadow);
+}
+
+canvas{
+  display:block;
+  width: 100%;
+  /* Keep plot area consistent */
+  height: 520px;     /* lock to avoid “shrinking” feel */
+}
+
+#errorBox{
+  display:none;
+  width: min(1200px, 92vw);
+  margin: 14px auto 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(155,44,44,0.35);
+  background: rgba(155,44,44,0.10);
+  color: #ffd7d7;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
