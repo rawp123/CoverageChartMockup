@@ -83,6 +83,14 @@
 
           <div class="controlPanel controlPanel--reset">
             <button type="button" id="resetAll" class="primaryBtn">Reset All</button>
+            <div class="exportMenu" id="exportMenu">
+              <button id="exportBtn" class="exportBtn" type="button" aria-expanded="false" aria-controls="exportMenuPanel">Export</button>
+              <div id="exportMenuPanel" class="exportMenuPanel" hidden>
+                <button id="exportPngBtn" type="button">Export Chart (PNG)</button>
+                <button id="exportCsvBtn" type="button">Export Data (CSV)</button>
+                <button id="exportPdfBtn" type="button">Export Report (PDF)</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -123,17 +131,16 @@
 
     <main class="content">
         <div class="chartWrap">
-          <div class="chartTopRow">
-            <div class="exportMenu" id="exportMenu">
-              <button id="exportBtn" class="exportBtn" type="button" aria-expanded="false" aria-controls="exportMenuPanel">Export</button>
-              <div id="exportMenuPanel" class="exportMenuPanel" hidden>
-                <button id="exportPngBtn" type="button">Export Chart (PNG)</button>
-                <button id="exportCsvBtn" type="button">Export Data (CSV)</button>
-                <button id="exportPdfBtn" type="button">Export Report (PDF)</button>
-              </div>
-            </div>
-          </div>
           <div id="activeFilterSummary" class="filterSummary"></div>
+          <div class="chartTopSummary">
+            <div id="availableCoverageBadge" class="coverageBadge">
+              Total Available Coverage: $0
+            </div>
+            <button id="toggleCoverageBadgeBtn" class="exportBtn" type="button" aria-pressed="true">
+              Hide Total Avaiable Limits
+            </button>
+          </div>
+          <div id="yearTotalsStrip" class="yearTotalsStrip"></div>
           <div class="chartViewport">
             <div class="chartSurface">
               <canvas id="coverageCanvas"></canvas>
@@ -163,7 +170,10 @@
       setEntityFilters,
       resetEntityFilters,
       setZoomRange,
-      resetZoomRange
+      resetZoomRange,
+      getFilteredSlices,
+      setCoverageTotalsVisible,
+      getYearLabelAnchors
     } from "/Modules/CoverageChart/CoverageChart.js";
 
     function showError(err) {
@@ -180,10 +190,17 @@
     async function init() {
       try {
         const THEME_STORAGE_KEY = "coverageChartTheme";
+        const COVERAGE_BADGE_STORAGE_KEY = "coverageChartShowAvailableTotal";
         const getPreferredTheme = () => {
           const stored = localStorage.getItem(THEME_STORAGE_KEY);
           if (stored === "light" || stored === "dark") return stored;
           return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        };
+        const getShowCoverageBadgePref = () => {
+          const stored = localStorage.getItem(COVERAGE_BADGE_STORAGE_KEY);
+          if (stored === "0") return false;
+          if (stored === "1") return true;
+          return true;
         };
         const applyThemeToPage = (theme) => {
           document.documentElement.dataset.theme = theme;
@@ -214,6 +231,9 @@
         const carrierDropdownLabel = document.getElementById("carrierDropdownLabel");
         const carrierGroupDropdownLabel = document.getElementById("carrierGroupDropdownLabel");
         const activeFilterSummary = document.getElementById("activeFilterSummary");
+        const yearTotalsStrip = document.getElementById("yearTotalsStrip");
+        const chartViewport = document.querySelector(".chartViewport");
+        const chartSurface = document.querySelector(".chartSurface");
         const zoomMinInput = document.getElementById("zoomMinInput");
         const zoomMaxInput = document.getElementById("zoomMaxInput");
         const resetAllBtn = document.getElementById("resetAll");
@@ -223,6 +243,56 @@
         const exportPngBtn = document.getElementById("exportPngBtn");
         const exportCsvBtn = document.getElementById("exportCsvBtn");
         const exportPdfBtn = document.getElementById("exportPdfBtn");
+        const availableCoverageBadge = document.getElementById("availableCoverageBadge");
+        const toggleCoverageBadgeBtn = document.getElementById("toggleCoverageBadgeBtn");
+        let showCoverageBadge = getShowCoverageBadgePref();
+        setCoverageTotalsVisible(showCoverageBadge);
+
+        function money(v) {
+          return `$${Number(v || 0).toLocaleString()}`;
+        }
+        function compactMoney(v) {
+          const n = Number(v);
+          if (!Number.isFinite(n)) return "$0";
+          const abs = Math.abs(n);
+          const sign = n < 0 ? "-" : "";
+          if (abs >= 1e9) return `$${sign}${(abs / 1e9).toFixed(abs >= 1e10 ? 0 : 1).replace(/\.0$/, "")}B`;
+          if (abs >= 1e6) return `$${sign}${(abs / 1e6).toFixed(abs >= 1e7 ? 0 : 1).replace(/\.0$/, "")}M`;
+          if (abs >= 1e3) return `$${sign}${(abs / 1e3).toFixed(abs >= 1e4 ? 0 : 1).replace(/\.0$/, "")}K`;
+          return `$${sign}${Math.round(abs).toLocaleString()}`;
+        }
+
+        function computeAvailableCoverage(slices, carriers, carrierGroups) {
+          const carrierSet = new Set(carriers);
+          const groupSet = new Set(carrierGroups);
+          return (slices || []).reduce((sum, s) => {
+            if (carrierSet.size > 0 && !carrierSet.has(String(s?.carrier || ""))) return sum;
+            if (groupSet.size > 0 && !groupSet.has(String(s?.carrierGroup || ""))) return sum;
+            const unavailable = String(s?.availability || "").toLowerCase().includes("unavail");
+            return sum + (unavailable ? 0 : Number(s?.sliceLimit || 0));
+          }, 0);
+        }
+        function computeAvailableCoverageByYear(slices, carriers, carrierGroups) {
+          const carrierSet = new Set(carriers);
+          const groupSet = new Set(carrierGroups);
+          const byYear = new Map();
+          for (const s of slices || []) {
+            if (carrierSet.size > 0 && !carrierSet.has(String(s?.carrier || ""))) continue;
+            if (groupSet.size > 0 && !groupSet.has(String(s?.carrierGroup || ""))) continue;
+            if (String(s?.availability || "").toLowerCase().includes("unavail")) continue;
+            const yearKey = String(s?.x ?? "").trim();
+            if (!yearKey) continue;
+            byYear.set(yearKey, (byYear.get(yearKey) || 0) + Number(s?.sliceLimit || 0));
+          }
+          return Array.from(byYear.entries())
+            .sort((a, b) => Number(a[0]) - Number(b[0]))
+            .map(([year, total]) => ({ year, total }));
+        }
+        function formatTenthMillion(value) {
+          const n = Number(value || 0);
+          const rounded = Math.round((n / 1_000_000) * 10) / 10;
+          return `$${rounded.toFixed(1)}M`;
+        }
 
         function closeExportMenu() {
           exportMenuPanel.hidden = true;
@@ -447,6 +517,26 @@
 
           const carriers = selectedValuesFromCheckboxMenu(carrierDropdownMenu);
           const carrierGroups = selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu);
+          const yearTotals = computeAvailableCoverageByYear(getFilteredSlices(), carriers, carrierGroups);
+          const totalsByYear = new Map(yearTotals.map((t) => [String(t.year), Number(t.total || 0)]));
+          const anchors = getYearLabelAnchors();
+          const totalAvailable = computeAvailableCoverage(getFilteredSlices(), carriers, carrierGroups);
+          availableCoverageBadge.textContent = `Total Available Coverage: ${money(totalAvailable)}`;
+          availableCoverageBadge.hidden = !showCoverageBadge;
+          yearTotalsStrip.hidden = !showCoverageBadge;
+          const surfaceW = Math.max(chartSurface?.clientWidth || 0, 240);
+          yearTotalsStrip.innerHTML = `<div class="yearTotalsSurface" style="width:${surfaceW}px;">` +
+            `<span class="yearTotalsLabel">Available Limits:</span>` +
+            anchors
+              .map((a) => {
+                const total = totalsByYear.get(String(a.x)) || 0;
+                return `<span class="yearTotalValue" style="left:${a.px}px;">${formatTenthMillion(total)}</span>`;
+              })
+              .join("") +
+            `</div>`;
+          if (chartViewport) yearTotalsStrip.scrollLeft = chartViewport.scrollLeft;
+          toggleCoverageBadgeBtn.textContent = showCoverageBadge ? "Hide Total Avaiable Limits" : "Show Total Avaiable Limits";
+          toggleCoverageBadgeBtn.setAttribute("aria-pressed", String(showCoverageBadge));
 
           activeFilterSummary.textContent =
             `Program: ${insuranceProgramSelect.value || "(none)"} | ` +
@@ -471,6 +561,17 @@
         zoomMaxInput.addEventListener("blur", applyZoomFilters);
         carrierDropdownMenu.addEventListener("change", () => applyEntityFilters("carrier"));
         carrierGroupDropdownMenu.addEventListener("change", () => applyEntityFilters("carrierGroup"));
+        if (chartViewport) {
+          chartViewport.addEventListener("scroll", () => {
+            yearTotalsStrip.scrollLeft = chartViewport.scrollLeft;
+          });
+        }
+        toggleCoverageBadgeBtn.addEventListener("click", () => {
+          showCoverageBadge = !showCoverageBadge;
+          localStorage.setItem(COVERAGE_BADGE_STORAGE_KEY, showCoverageBadge ? "1" : "0");
+          setCoverageTotalsVisible(showCoverageBadge);
+          updateFilterSummary();
+        });
 
         function resetEntityFilterUI() {
           clearCheckboxMenu(carrierDropdownMenu);
@@ -504,6 +605,9 @@
           resetPolicyLimitTypeFilter();
           setPolicyLimitTypeFilter(defaultPolicyLimitType);
           resetEntityFilters();
+          showCoverageBadge = true;
+          localStorage.setItem(COVERAGE_BADGE_STORAGE_KEY, "1");
+          setCoverageTotalsVisible(true);
           updateFilterSummary();
         });
         updateFilterSummary();

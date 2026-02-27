@@ -575,6 +575,23 @@ body{
   gap: 10px;
 }
 
+.chartTopSummary{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coverageBadge{
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 12px;
+  background: color-mix(in oklab, var(--bg2) 86%, white 14%);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .exportMenu{
   position: relative;
   flex: 0 0 auto;
@@ -639,6 +656,46 @@ body{
   background: rgba(255,255,255,0.04);
   white-space: nowrap;
   overflow-x: auto;
+}
+
+.yearTotalsStrip{
+  position: relative;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+}
+
+.yearTotalsSurface{
+  position: relative;
+  height: 16px;
+  min-width: 100%;
+}
+
+.yearTotalsLabel{
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.yearTotalValue{
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  text-align: center;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  pointer-events: none;
 }
 
 .chartHint kbd{
@@ -712,6 +769,11 @@ body{
   .chartTopRow{
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .chartTopSummary{
+    justify-content: space-between;
+    width: 100%;
   }
 
   .exportMenu{

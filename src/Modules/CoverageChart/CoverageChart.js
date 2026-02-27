@@ -27,9 +27,12 @@ let _cache = {
     surface: null
   },
   _wheelBound: false,
+  showCoverageTotals: true,
   filters: {
     startYear: null,
     endYear: null,
+    startDate: null,
+    endDate: null,
     zoomMin: null,
     zoomMax: null,
     sirMode: "off",
@@ -66,6 +69,17 @@ const yearOf = (v) => {
   const m = s.match(/(\d{4})/);
   return m ? +m[1] : null;
 };
+
+const parseDateToUTC = (v) => {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+};
+
+const startOfYearUTC = (y) => Date.UTC(y, 0, 1, 0, 0, 0, 0);
+const endOfYearUTC = (y) => Date.UTC(y, 11, 31, 23, 59, 59, 999);
 
 const money = (v) => `$${Number(v || 0).toLocaleString()}`;
 
@@ -114,7 +128,9 @@ const summarizeFilterSelection = (items, singular, pluralAll) => {
 function getLegendFilterLines() {
   const f = _cache?.filters || {};
   const yearsText =
-    Number.isFinite(f.startYear) || Number.isFinite(f.endYear)
+    f.startDate || f.endDate
+      ? `${String(f.startDate || "All")} to ${String(f.endDate || "All")}`
+      : Number.isFinite(f.startYear) || Number.isFinite(f.endYear)
       ? `${Number.isFinite(f.startYear) ? f.startYear : "All"} to ${Number.isFinite(f.endYear) ? f.endYear : "All"}`
       : "All years";
   const zoomText =
@@ -182,12 +198,55 @@ function normalizeHeader(h) {
   return String(h ?? "").trim().replace(/\s+/g, " ");
 }
 
+const DISTINCT_COLOR_HUES = [
+  210, 0, 120, 280, 32, 15, 330, 190,
+  65, 265, 235, 142, 350, 45, 170, 255,
+  95, 300, 20, 200, 110, 340, 52, 182,
+  224, 10, 78, 160, 246, 132, 315, 26
+];
+const _colorSlotByKey = new Map();
+const _usedPaletteSlots = new Set();
+
+const hashString = (s) => {
+  let hash = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return hash >>> 0;
+};
+
 function colorFromString(str) {
-  const s = String(str ?? "");
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  const s = String(str ?? "").trim().toLowerCase() || "(blank)";
+  if (_colorSlotByKey.has(s)) {
+    const slot = _colorSlotByKey.get(s);
+    const hue = DISTINCT_COLOR_HUES[slot % DISTINCT_COLOR_HUES.length];
+    const light = getThemeName() === "light" ? 40 : 58;
+    const sat = getThemeName() === "light" ? 72 : 78;
+    return `hsl(${hue}, ${sat}%, ${light}%)`;
+  }
+
+  const hash = hashString(s);
+  const size = DISTINCT_COLOR_HUES.length;
+  // Probe through a curated palette so adjacent keys don't end up visually close.
+  const base = hash % size;
+  const step = 11; // coprime with palette size
+  for (let i = 0; i < size; i++) {
+    const idx = (base + i * step) % size;
+    if (_usedPaletteSlots.has(idx)) continue;
+    _usedPaletteSlots.add(idx);
+    _colorSlotByKey.set(s, idx);
+    const hue = DISTINCT_COLOR_HUES[idx];
+    const light = getThemeName() === "light" ? 40 : 58;
+    const sat = getThemeName() === "light" ? 72 : 78;
+    return `hsl(${hue}, ${sat}%, ${light}%)`;
+  }
+
+  // Fallback if palette is exhausted.
   const hue = hash % 360;
-  return `hsl(${hue}, 70%, 55%)`;
+  const sat = getThemeName() === "light" ? 72 : 78;
+  const light = getThemeName() === "light" ? 40 : 58;
+  return `hsl(${hue}, ${sat}%, ${light}%)`;
 }
 
 /* ================================
@@ -373,6 +432,145 @@ const legendFiltersPanelPlugin = {
   }
 };
 
+const boxValueLabelsPlugin = {
+  id: "boxValueLabels",
+  afterDatasetsDraw(chartInstance) {
+    const { ctx } = chartInstance;
+    const xScale = chartInstance.scales?.x;
+    const yScale = chartInstance.scales?.y;
+    if (!xScale || !yScale) return;
+
+    ctx.save();
+    ctx.font = "600 10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    ctx.strokeStyle = "rgba(11,17,27,0.8)";
+    ctx.lineWidth = 2;
+
+    chartInstance.data.datasets.forEach((ds, di) => {
+      if (!ds || ds.datasetId === "sirOverlay" || ds.type === "line") return;
+      const meta = chartInstance.getDatasetMeta(di);
+      if (!meta || meta.hidden) return;
+
+      meta.data.forEach((bar, idx) => {
+        const raw = ds.data?.[idx];
+        if (!raw) return;
+        const attach = Number(raw.attach || 0);
+        const top = Number(raw.top || 0);
+        const lim = Number(raw.sumLimit ?? Math.max(0, top - attach));
+        if (!Number.isFinite(lim) || lim <= 0) return;
+
+        const props = bar.getProps(["x", "width"], true);
+        const yTop = yScale.getPixelForValue(top);
+        const yBottom = yScale.getPixelForValue(attach);
+        const boxHeight = Math.abs(yBottom - yTop);
+        const boxWidth = Number(props?.width || 0);
+
+        // Keep labels only where they are likely to remain legible.
+        if (boxHeight < 15 || boxWidth < 34) return;
+
+        const label = compactMoney(lim);
+        const maxTextWidth = Math.max(0, boxWidth - 8);
+        const textWidth = ctx.measureText(label).width;
+        if (textWidth > maxTextWidth) return;
+
+        const x = Number(props.x || 0);
+        const y = (yTop + yBottom) / 2;
+        ctx.strokeText(label, x, y);
+        ctx.fillText(label, x, y);
+      });
+    });
+
+    ctx.restore();
+  }
+};
+
+const yearAvailableTotalsPlugin = {
+  id: "yearAvailableTotals",
+  afterDatasetsDraw(chartInstance) {
+    // Totals are rendered in page-level UI above the chart (outside canvas).
+    return;
+    if (_cache.showCoverageTotals === false) return;
+    const xScale = chartInstance?.scales?.x;
+    const yScale = chartInstance?.scales?.y;
+    const chartArea = chartInstance?.chartArea;
+    if (!xScale || !yScale || !chartArea) return;
+
+    const selection = getSelectionSets();
+    const byX = new Map(); // x -> { total, top }
+
+    for (const s of _cache.slices || []) {
+      const x = String(s?.x ?? "");
+      if (!x) continue;
+      if (!sliceMatchesSelection(s, selection)) continue;
+      if (String(s?.availability || "").toLowerCase().includes("unavail")) continue;
+
+      const limit = Number(s?.sliceLimit || 0);
+      const attach = Number(s?.attach || 0);
+      const top = attach + limit;
+      if (!Number.isFinite(limit) || limit <= 0) continue;
+      if (!Number.isFinite(top)) continue;
+
+      if (!byX.has(x)) byX.set(x, { total: 0, top: 0 });
+      const e = byX.get(x);
+      e.total += limit;
+      e.top = Math.max(e.top, top);
+    }
+
+    if (!byX.size) return;
+
+    const theme = getThemeName();
+    const textColor = theme === "light" ? "rgba(15, 23, 42, 0.96)" : "rgba(241, 245, 249, 0.96)";
+    const pillBg = theme === "light" ? "rgba(255,255,255,0.88)" : "rgba(15,23,42,0.72)";
+    const pillBorder = theme === "light" ? "rgba(15, 23, 42, 0.2)" : "rgba(241,245,249,0.24)";
+
+    const ctx = chartInstance.ctx;
+    ctx.save();
+    ctx.font = "700 10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const entries = Array.from(byX.entries())
+      .map(([x, stat]) => ({
+        stat,
+        px: xScale.getPixelForValue(x),
+        pyTop: yScale.getPixelForValue(Number(stat?.top || 0))
+      }))
+      .filter((e) => Number.isFinite(e.px) && Number.isFinite(e.pyTop))
+      .sort((a, b) => a.px - b.px);
+
+    let lastRight = Number.NEGATIVE_INFINITY;
+    for (const { stat, px, pyTop } of entries) {
+      if (!Number.isFinite(stat.total) || stat.total <= 0) continue;
+      const label = compactMoney(stat.total);
+      const textW = ctx.measureText(label).width;
+      const padX = 4;
+      const pillW = textW + padX * 2;
+      const pillH = 14;
+      const yCenter = Math.max(chartArea.top + pillH / 2 + 2, pyTop - 8);
+      const left = px - pillW / 2;
+      const right = px + pillW / 2;
+
+      // Skip cramped labels to avoid unreadable overlaps.
+      if (left <= lastRight + 6) continue;
+      lastRight = right;
+
+      roundedRectPath(ctx, left, yCenter - pillH / 2, pillW, pillH, 4);
+      ctx.fillStyle = pillBg;
+      ctx.fill();
+      ctx.strokeStyle = pillBorder;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = textColor;
+      ctx.fillText(label, px, yCenter);
+    }
+
+    ctx.restore();
+  }
+};
+
 /* ================================
    CSV Parser (robust)
 ================================ */
@@ -527,10 +725,17 @@ function buildSlices({
     const end = String(getBy(row, "PEndDate", "PolicyEndDate", "EndDate")).trim();
     policyDateMap[pid] = { start, end };
 
-    const y = yearOf(start);
-    if (Number.isFinite(y)) {
-      minYear = Math.min(minYear, y);
-      maxYear = Math.max(maxYear, y);
+    const startDate = parseDateToUTC(start);
+    const endDate = parseDateToUTC(end);
+    const startYear = startDate ? startDate.getUTCFullYear() : yearOf(start);
+    const endYear = endDate ? endDate.getUTCFullYear() : yearOf(end);
+    if (Number.isFinite(startYear)) {
+      minYear = Math.min(minYear, startYear);
+      maxYear = Math.max(maxYear, startYear);
+    }
+    if (Number.isFinite(endYear)) {
+      minYear = Math.min(minYear, endYear);
+      maxYear = Math.max(maxYear, endYear);
     }
   }
 
@@ -642,10 +847,21 @@ function buildSlices({
     const dates = policyDateMap[pid];
     if (!dates || !dates.start || !dates.end) continue;
 
-    const yr = yearOf(dates.start);
-    if (!Number.isFinite(yr)) continue;
+    const startDate = parseDateToUTC(dates.start);
+    const endDate = parseDateToUTC(dates.end);
+    const startYear = startDate ? startDate.getUTCFullYear() : yearOf(dates.start);
+    const endYear = endDate ? endDate.getUTCFullYear() : yearOf(dates.end);
+    if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) continue;
+    const policyStartYear = Math.min(startYear, endYear);
+    const policyEndYear = Math.max(startYear, endYear);
+    const policyStartMs = startDate
+      ? startDate.getTime()
+      : startOfYearUTC(policyStartYear);
+    const policyEndMs = endDate
+      ? endDate.getTime() + (24 * 60 * 60 * 1000 - 1)
+      : endOfYearUTC(policyEndYear);
 
-    const x = useYearAxis ? String(yr) : `${dates.start} to ${dates.end}`;
+    const x = useYearAxis ? String(policyStartYear) : `${dates.start} to ${dates.end}`;
 
     const attachRaw = firstPresentNum(
       getBy(r, "Attachment Point", "AttachmentPoint", "attach", "Attatchment Point")
@@ -679,7 +895,11 @@ function buildSlices({
 
     slices.push({
       x,
-      year: yr,
+      year: policyStartYear,
+      policyStartYear,
+      policyEndYear,
+      policyStartMs,
+      policyEndMs,
       attach,
       sliceLimit,
       PolicyID: pid,
@@ -739,16 +959,28 @@ function applyFiltersToCache() {
   const { allSlices, allXLabels, useYearAxis, filters } = _cache;
   const startYear = Number.isFinite(filters.startYear) ? filters.startYear : null;
   const endYear = Number.isFinite(filters.endYear) ? filters.endYear : null;
+  const startDate = parseDateToUTC(filters.startDate);
+  const endDate = parseDateToUTC(filters.endDate);
   const selectedProgram = String(filters.insuranceProgram || "").trim();
   const selectedPolicyLimitType = String(filters.policyLimitType || "").trim();
 
   let filteredSlices = allSlices.slice();
-  if (useYearAxis && (startYear !== null || endYear !== null)) {
+  if (useYearAxis && (startYear !== null || endYear !== null || startDate || endDate)) {
+    const filterStartMs = startDate
+      ? startDate.getTime()
+      : startYear !== null
+      ? startOfYearUTC(startYear)
+      : Number.NEGATIVE_INFINITY;
+    const filterEndMs = endDate
+      ? endDate.getTime() + (24 * 60 * 60 * 1000 - 1)
+      : endYear !== null
+      ? endOfYearUTC(endYear)
+      : Number.POSITIVE_INFINITY;
     filteredSlices = filteredSlices.filter((s) => {
-      if (!Number.isFinite(s.year)) return false;
-      if (startYear !== null && s.year < startYear) return false;
-      if (endYear !== null && s.year > endYear) return false;
-      return true;
+      const policyStartMs = Number(s?.policyStartMs);
+      const policyEndMs = Number(s?.policyEndMs);
+      if (!Number.isFinite(policyStartMs) || !Number.isFinite(policyEndMs)) return false;
+      return policyStartMs <= filterEndMs && policyEndMs >= filterStartMs;
     });
   }
 
@@ -765,14 +997,25 @@ function applyFiltersToCache() {
   }
 
   let filteredXLabels = allXLabels.slice();
-  if (useYearAxis && (startYear !== null || endYear !== null)) {
-    filteredXLabels = filteredXLabels.filter((lbl) => {
-      const y = Number(lbl);
-      if (!Number.isFinite(y)) return false;
-      if (startYear !== null && y < startYear) return false;
-      if (endYear !== null && y > endYear) return false;
-      return true;
-    });
+  if (useYearAxis && filteredSlices.length > 0) {
+    const minSliceYear = Math.min(
+      ...filteredSlices
+        .map((s) => Number(s?.policyStartYear))
+        .filter((y) => Number.isFinite(y))
+    );
+    const maxSliceYear = Math.max(
+      ...filteredSlices
+        .map((s) => Number(s?.policyEndYear))
+        .filter((y) => Number.isFinite(y))
+    );
+    if (Number.isFinite(minSliceYear) && Number.isFinite(maxSliceYear) && minSliceYear <= maxSliceYear) {
+      filteredXLabels = [];
+      for (let y = minSliceYear; y <= maxSliceYear; y++) filteredXLabels.push(String(y));
+    } else if (startYear !== null || endYear !== null) {
+      filteredXLabels = [];
+    }
+  } else if (useYearAxis && (startYear !== null || endYear !== null || startDate || endDate)) {
+    filteredXLabels = [];
   }
 
   _cache.slices = filteredSlices;
@@ -842,28 +1085,28 @@ function syncChartViewportWidth({ anchorClientX } = {}) {
 
 function bindViewportInteractions() {
   const viewport = _cache.dom?.viewport;
-  if (!viewport || _cache._wheelBound) return;
+  const canvas = _cache.dom?.canvas;
+  if (!viewport || !canvas || _cache._wheelBound) return;
 
-  viewport.addEventListener(
-    "wheel",
-    (e) => {
-      // Ctrl/Cmd + wheel: horizontal zoom around cursor.
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const factor = Math.exp(-e.deltaY * 0.0015);
-        _cache.xZoom = clamp((_cache.xZoom || 1) * factor, 0.45, 4);
-        syncChartViewportWidth({ anchorClientX: e.clientX });
-        return;
-      }
+  const onWheel = (e) => {
+    // Shift + wheel: horizontal scroll.
+    if (e.shiftKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+      e.preventDefault();
+      viewport.scrollLeft += e.deltaY;
+      return;
+    }
 
-      // Shift + wheel: smoother horizontal scrolling in dense views.
-      if (e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-        e.preventDefault();
-        viewport.scrollLeft += e.deltaY;
-      }
-    },
-    { passive: false }
-  );
+    // Default wheel: zoom x-axis around cursor.
+    e.preventDefault();
+    const delta = Math.abs(e.deltaY) > 0 ? e.deltaY : e.deltaX;
+    const factor = Math.exp(-delta * 0.0015);
+    _cache.xZoom = clamp((_cache.xZoom || 1) * factor, 0.45, 4);
+    syncChartViewportWidth({ anchorClientX: e.clientX });
+  };
+
+  // Bind to both container and canvas for browser consistency.
+  viewport.addEventListener("wheel", onWheel, { passive: false });
+  canvas.addEventListener("wheel", onWheel, { passive: false });
 
   _cache._wheelBound = true;
 }
@@ -907,6 +1150,7 @@ function applyChartTheme(themeName = getThemeName()) {
   const c = getChartThemeColors(themeName);
   chart.options.plugins.outlineBars.color = c.outline;
   chart.options.plugins.legend.labels.color = c.legendText;
+  chart.options.plugins.legend.title.color = c.legendText;
   chart.options.scales.x.grid.color = c.xGrid;
   chart.options.scales.x.ticks.color = c.axisTicks;
   chart.options.scales.y.grid.color = c.yGrid;
@@ -1024,6 +1268,43 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   // Fill the category slot so columns touch, while avoiding overflow from rounding.
   const autoBarThickness = Math.max(8, Math.floor(slotWidth));
   const barThicknessPx = useFlexBarWidth ? autoBarThickness : requestedBarThickness;
+  const quotaGradientForCarrierView = (context, pointRaw) => {
+    const parts = Array.isArray(pointRaw?.participants) ? pointRaw.participants : [];
+    const weightedParts = parts
+      .map((p) => ({
+        limit: Number(p?.sliceLimit || 0),
+        color: colorFromString(p?.carrier || "Quota share")
+      }))
+      .filter((p) => Number.isFinite(p.limit) && p.limit > 0);
+    if (!weightedParts.length) return colorFromString("Quota share");
+
+    const total = weightedParts.reduce((sum, p) => sum + p.limit, 0);
+    if (!Number.isFinite(total) || total <= 0) return weightedParts[0].color;
+
+    const chartInstance = context?.chart;
+    const yScale = chartInstance?.scales?.y;
+    const canvasCtx = chartInstance?.ctx;
+    if (!yScale || !canvasCtx) return weightedParts[0].color;
+
+    const top = Number(pointRaw?.top || 0);
+    const attach = Number(pointRaw?.attach || 0);
+    const yTop = yScale.getPixelForValue(top);
+    const yBottom = yScale.getPixelForValue(attach);
+    if (!Number.isFinite(yTop) || !Number.isFinite(yBottom)) return weightedParts[0].color;
+    if (yTop === yBottom) return weightedParts[0].color;
+    const gradient = canvasCtx.createLinearGradient(0, yBottom, 0, yTop);
+
+    let running = 0;
+    for (const p of weightedParts) {
+      const start = clamp(running / total, 0, 1);
+      running += p.limit;
+      const end = clamp(running / total, 0, 1);
+      gradient.addColorStop(start, p.color);
+      gradient.addColorStop(end, p.color);
+    }
+
+    return gradient;
+  };
 
   return groupList.map((group) => {
     const points = [];
@@ -1082,6 +1363,7 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
     const datasetInFocus = !selection.active || hasHighlightedPoint;
     const mutedFill = "rgba(255,255,255,0.92)";
     const mutedBorder = "rgba(0,0,0,0.9)";
+    const isQuotaDataset = group === "Quota share";
 
     return {
       label: group,
@@ -1096,7 +1378,14 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
       barPercentage: 1.0,
       inflateAmount: 0.6,
 
-      backgroundColor: datasetInFocus ? bg : mutedFill,
+      backgroundColor: (context) => {
+        if (!datasetInFocus) return mutedFill;
+        const raw = context?.raw || null;
+        if (view === "carrier" && isQuotaDataset && raw?.isQuotaShare) {
+          return quotaGradientForCarrierView(context, raw);
+        }
+        return bg;
+      },
       borderColor: datasetInFocus ? "rgba(11, 17, 27, 0.62)" : mutedBorder,
       borderWidth: 1,
       borderRadius: 2,
@@ -1215,7 +1504,9 @@ async function ensurePdfLibs() {
 function getFilterMeta() {
   const f = _cache.filters || {};
   const yearRange =
-    Number.isFinite(f.startYear) || Number.isFinite(f.endYear)
+    f.startDate || f.endDate
+      ? `${String(f.startDate || "All")}-${String(f.endDate || "All")}`
+      : Number.isFinite(f.startYear) || Number.isFinite(f.endYear)
       ? `${Number.isFinite(f.startYear) ? f.startYear : "All"}-${Number.isFinite(f.endYear) ? f.endYear : "All"}`
       : "All";
   const carriers = normalizeStringList(f.carriers);
@@ -1501,7 +1792,15 @@ export function getView() {
 
 export function setChartTheme(themeName) {
   const theme = themeName === "light" ? "light" : "dark";
+  // Rebuild so dataset colors are recalculated for the active theme.
+  rebuildChart();
   applyChartTheme(theme);
+}
+
+export function setCoverageTotalsVisible(visible) {
+  _cache.showCoverageTotals = visible !== false;
+  // No-op for canvas totals; external UI handles visibility.
+  if (chart) chart.update("none");
 }
 
 export function setSIRMode(mode) {
@@ -1515,12 +1814,24 @@ export function getYearBounds() {
     .map((lbl) => Number(lbl))
     .filter((y) => Number.isFinite(y))
     .sort((a, b) => a - b);
+  const filterStartDate = parseDateToUTC(_cache.filters.startDate);
+  const filterEndDate = parseDateToUTC(_cache.filters.endDate);
+  const selectedStartYear = filterStartDate
+    ? filterStartDate.getUTCFullYear()
+    : Number.isFinite(_cache.filters.startYear)
+    ? _cache.filters.startYear
+    : null;
+  const selectedEndYear = filterEndDate
+    ? filterEndDate.getUTCFullYear()
+    : Number.isFinite(_cache.filters.endYear)
+    ? _cache.filters.endYear
+    : null;
 
   return {
     minYear: years.length ? years[0] : null,
     maxYear: years.length ? years[years.length - 1] : null,
-    startYear: Number.isFinite(_cache.filters.startYear) ? _cache.filters.startYear : null,
-    endYear: Number.isFinite(_cache.filters.endYear) ? _cache.filters.endYear : null
+    startYear: selectedStartYear,
+    endYear: selectedEndYear
   };
 }
 
@@ -1554,6 +1865,19 @@ export function getFilterOptions() {
 
 export function getFilteredSlices() {
   return Array.isArray(_cache.slices) ? _cache.slices.slice() : [];
+}
+
+export function getYearLabelAnchors() {
+  const xScale = chart?.scales?.x;
+  if (!xScale || !Array.isArray(_cache.xLabels)) return [];
+  const anchors = [];
+  for (const lbl of _cache.xLabels) {
+    const key = String(lbl ?? "");
+    const px = Number(xScale.getPixelForValue(key));
+    if (!Number.isFinite(px)) continue;
+    anchors.push({ x: key, px });
+  }
+  return anchors;
 }
 
 export function setInsuranceProgramFilter(insuranceProgram) {
@@ -1606,11 +1930,37 @@ export function setYearRange(startYear, endYear) {
 
   _cache.filters.startYear = start;
   _cache.filters.endYear = end;
+  _cache.filters.startDate = null;
+  _cache.filters.endDate = null;
   applyFiltersToCache();
   rebuildChart();
 }
 
 export function resetYearRange() {
+  _cache.filters.startYear = null;
+  _cache.filters.endYear = null;
+  _cache.filters.startDate = null;
+  _cache.filters.endDate = null;
+  applyFiltersToCache();
+  rebuildChart();
+}
+
+export function setDateRange(startDate, endDate) {
+  let start = parseDateToUTC(startDate);
+  let end = parseDateToUTC(endDate);
+  if (start && end && start.getTime() > end.getTime()) [start, end] = [end, start];
+
+  _cache.filters.startDate = start ? start.toISOString().slice(0, 10) : null;
+  _cache.filters.endDate = end ? end.toISOString().slice(0, 10) : null;
+  _cache.filters.startYear = start ? start.getUTCFullYear() : null;
+  _cache.filters.endYear = end ? end.getUTCFullYear() : null;
+  applyFiltersToCache();
+  rebuildChart();
+}
+
+export function resetDateRange() {
+  _cache.filters.startDate = null;
+  _cache.filters.endDate = null;
   _cache.filters.startYear = null;
   _cache.filters.endYear = null;
   applyFiltersToCache();
@@ -1714,9 +2064,12 @@ export async function renderCoverageChart({
       surface: canvas.parentElement
     },
     _wheelBound: _cache._wheelBound || false,
+    showCoverageTotals: typeof _cache.showCoverageTotals === "boolean" ? _cache.showCoverageTotals : true,
     filters: {
       startYear: null,
       endYear: null,
+      startDate: null,
+      endDate: null,
       zoomMin: null,
       zoomMax: null,
       sirMode: _cache.filters?.sirMode || "off",
@@ -1751,7 +2104,7 @@ export async function renderCoverageChart({
       labels: _cache.xLabels,
       datasets: sirDataset ? [...datasets, sirDataset] : datasets
     },
-    plugins: [outlineBarsPlugin, quotaShareGuidesPlugin],
+    plugins: [outlineBarsPlugin, quotaShareGuidesPlugin, boxValueLabelsPlugin, yearAvailableTotalsPlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -1763,7 +2116,7 @@ export async function renderCoverageChart({
       layout: {
         // Keep bars/outline away from the extreme plot edges without using x.offset,
         // which can break floating + non-grouped bar geometry in this chart.
-        padding: { left: 8, right: 24 }
+        padding: { top: 8, left: 8, right: 24 }
       },
 
       plugins: {
@@ -1822,21 +2175,24 @@ export async function renderCoverageChart({
               lines.push(`Attach: ${money(attach)}`);
               lines.push(`Limit: ${money(lim)}`);
               lines.push(`Top: ${money(top)}`);
-              const sirValsPerOcc = (Array.isArray(r.participants) ? r.participants : [])
-                .map((p) => Number(p?.sirPerOcc || 0))
-                .filter((v) => Number.isFinite(v) && v > 0);
-              const sirValsAgg = (Array.isArray(r.participants) ? r.participants : [])
-                .map((p) => Number(p?.sirAggregate || 0))
-                .filter((v) => Number.isFinite(v) && v > 0);
-              if (sirValsPerOcc.length) {
-                const min = Math.min(...sirValsPerOcc);
-                const max = Math.max(...sirValsPerOcc);
-                lines.push(`SIR (Per Occ): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
-              }
-              if (sirValsAgg.length) {
-                const min = Math.min(...sirValsAgg);
-                const max = Math.max(...sirValsAgg);
-                lines.push(`SIR (Aggregate): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
+              const isPrimaryLayer = Number(attach) <= 0;
+              if (isPrimaryLayer) {
+                const sirValsPerOcc = (Array.isArray(r.participants) ? r.participants : [])
+                  .map((p) => Number(p?.sirPerOcc || 0))
+                  .filter((v) => Number.isFinite(v) && v > 0);
+                const sirValsAgg = (Array.isArray(r.participants) ? r.participants : [])
+                  .map((p) => Number(p?.sirAggregate || 0))
+                  .filter((v) => Number.isFinite(v) && v > 0);
+                if (sirValsPerOcc.length) {
+                  const min = Math.min(...sirValsPerOcc);
+                  const max = Math.max(...sirValsPerOcc);
+                  lines.push(`SIR (Per Occ): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
+                }
+                if (sirValsAgg.length) {
+                  const min = Math.min(...sirValsAgg);
+                  const max = Math.max(...sirValsAgg);
+                  lines.push(`SIR (Aggregate): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
+                }
               }
 
               const parts = Array.isArray(r.participants) ? r.participants : [];
