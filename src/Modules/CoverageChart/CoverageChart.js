@@ -80,6 +80,40 @@ const parseDateToUTC = (v) => {
 
 const startOfYearUTC = (y) => Date.UTC(y, 0, 1, 0, 0, 0, 0);
 const endOfYearUTC = (y) => Date.UTC(y, 11, 31, 23, 59, 59, 999);
+const startOfNextYearUTC = (y) => Date.UTC(y + 1, 0, 1, 0, 0, 0, 0);
+
+function msToYearAxisValue(ms) {
+  const t = Number(ms);
+  if (!Number.isFinite(t)) return NaN;
+  const d = new Date(t);
+  const y = d.getUTCFullYear();
+  const yearStart = startOfYearUTC(y);
+  const nextYearStart = startOfNextYearUTC(y);
+  const span = nextYearStart - yearStart;
+  if (!(span > 0)) return y;
+  const frac = clamp((t - yearStart) / span, 0, 1);
+  // Center each calendar year on its integer tick:
+  // Jan 1 -> (year - 0.5), Dec 31 -> (~year + 0.5).
+  return y - 0.5 + frac;
+}
+
+function getYearAxisBounds(xLabels) {
+  const years = (xLabels || [])
+    .map((lbl) => Number(lbl))
+    .filter((y) => Number.isFinite(y))
+    .sort((a, b) => a - b);
+  if (!years.length) return { min: 0, max: 1 };
+  return {
+    min: years[0] - 0.5,
+    max: years[years.length - 1] + 0.5
+  };
+}
+
+function yearLabelFromAxisValue(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "";
+  return String(Math.floor(n + 0.5));
+}
 
 const money = (v) => `$${Number(v || 0).toLocaleString()}`;
 
@@ -105,6 +139,19 @@ function compactMoney(v) {
   }
 
   return `$${sign}${Math.round(abs).toLocaleString()}`;
+}
+
+function formatFullDateUTC(value) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC"
+  });
 }
 
 const normKey = (k) =>
@@ -198,14 +245,19 @@ function normalizeHeader(h) {
   return String(h ?? "").trim().replace(/\s+/g, " ");
 }
 
-const DISTINCT_COLOR_HUES = [
-  210, 0, 120, 280, 32, 15, 330, 190,
-  65, 265, 235, 142, 350, 45, 170, 255,
-  95, 300, 20, 200, 110, 340, 52, 182,
-  224, 10, 78, 160, 246, 132, 315, 26
-];
-const _colorSlotByKey = new Map();
-const _usedPaletteSlots = new Set();
+const _colorSpecByKey = new Map();
+
+const normalizeHue = (h) => {
+  const n = Number(h);
+  if (!Number.isFinite(n)) return 0;
+  const m = n % 360;
+  return m < 0 ? m + 360 : m;
+};
+
+const hueDistance = (a, b) => {
+  const d = Math.abs(normalizeHue(a) - normalizeHue(b));
+  return Math.min(d, 360 - d);
+};
 
 const hashString = (s) => {
   let hash = 2166136261 >>> 0;
@@ -218,34 +270,54 @@ const hashString = (s) => {
 
 function colorFromString(str) {
   const s = String(str ?? "").trim().toLowerCase() || "(blank)";
-  if (_colorSlotByKey.has(s)) {
-    const slot = _colorSlotByKey.get(s);
-    const hue = DISTINCT_COLOR_HUES[slot % DISTINCT_COLOR_HUES.length];
-    const light = getThemeName() === "light" ? 40 : 58;
-    const sat = getThemeName() === "light" ? 72 : 78;
-    return `hsl(${hue}, ${sat}%, ${light}%)`;
+  if (!_colorSpecByKey.has(s)) {
+    const hash = hashString(s);
+    const seedHue = normalizeHue(hash % 360);
+    const usedHues = Array.from(_colorSpecByKey.values()).map((v) => Number(v?.hue || 0));
+
+    let chosenHue = seedHue;
+    let bestDistance = -1;
+    let bestSeedDistance = 181;
+
+    // Distance-aware hue selection keeps nearby carriers visually distinct.
+    // Evaluate the full hue wheel, then tie-break toward the hash seed.
+    for (let candidate = 0; candidate < 360; candidate++) {
+      if (!usedHues.length) {
+        chosenHue = seedHue;
+        bestDistance = 180;
+        bestSeedDistance = 0;
+        break;
+      }
+
+      let minDistance = 180;
+      for (const used of usedHues) {
+        minDistance = Math.min(minDistance, hueDistance(candidate, used));
+        if (minDistance < bestDistance) break;
+      }
+      const seedDistance = hueDistance(candidate, seedHue);
+      if (
+        minDistance > bestDistance ||
+        (minDistance === bestDistance && seedDistance < bestSeedDistance)
+      ) {
+        bestDistance = minDistance;
+        bestSeedDistance = seedDistance;
+        chosenHue = candidate;
+      }
+    }
+
+    const tone = hash % 3;
+    _colorSpecByKey.set(s, { hue: chosenHue, tone });
   }
 
-  const hash = hashString(s);
-  const size = DISTINCT_COLOR_HUES.length;
-  // Probe through a curated palette so adjacent keys don't end up visually close.
-  const base = hash % size;
-  const step = 11; // coprime with palette size
-  for (let i = 0; i < size; i++) {
-    const idx = (base + i * step) % size;
-    if (_usedPaletteSlots.has(idx)) continue;
-    _usedPaletteSlots.add(idx);
-    _colorSlotByKey.set(s, idx);
-    const hue = DISTINCT_COLOR_HUES[idx];
-    const light = getThemeName() === "light" ? 40 : 58;
-    const sat = getThemeName() === "light" ? 72 : 78;
-    return `hsl(${hue}, ${sat}%, ${light}%)`;
-  }
+  const spec = _colorSpecByKey.get(s) || { hue: 210, tone: 0 };
+  const isLight = getThemeName() === "light";
+  const satPalette = isLight ? [80, 74, 86] : [74, 80, 86];
+  const lightPalette = isLight ? [42, 48, 36] : [58, 54, 62];
+  const tone = clamp(Number(spec.tone || 0), 0, satPalette.length - 1);
+  const sat = satPalette[tone];
+  const light = lightPalette[tone];
+  const hue = Math.round(normalizeHue(spec.hue));
 
-  // Fallback if palette is exhausted.
-  const hue = hash % 360;
-  const sat = getThemeName() === "light" ? 72 : 78;
-  const light = getThemeName() === "light" ? 40 : 58;
   return `hsl(${hue}, ${sat}%, ${light}%)`;
 }
 
@@ -276,7 +348,7 @@ const outlineBarsPlugin = {
       if (meta.hidden) return;
 
       meta.data.forEach((bar) => {
-        const props = bar.getProps(["x", "y", "base", "width"], true);
+        const props = bar.getProps(["x", "y", "base", "width"], false);
         if (![props.x, props.y, props.base, props.width].every(Number.isFinite)) return;
         const left = props.x - props.width / 2;
         const top = Math.min(props.y, props.base);
@@ -321,7 +393,7 @@ const quotaShareGuidesPlugin = {
         const parts = Array.isArray(raw.participants) ? raw.participants : [];
         if (parts.length < 2) return;
 
-        const props = bar.getProps(["x", "width"], true);
+        const props = bar.getProps(["x", "width"], false);
         const left = props.x - props.width / 2;
         const right = props.x + props.width / 2;
 
@@ -435,6 +507,8 @@ const legendFiltersPanelPlugin = {
 const boxValueLabelsPlugin = {
   id: "boxValueLabels",
   afterDatasetsDraw(chartInstance) {
+    // Temporarily disabled: per-layer value labels add too much visual noise.
+    return;
     const { ctx } = chartInstance;
     const xScale = chartInstance.scales?.x;
     const yScale = chartInstance.scales?.y;
@@ -461,7 +535,7 @@ const boxValueLabelsPlugin = {
         const lim = Number(raw.sumLimit ?? Math.max(0, top - attach));
         if (!Number.isFinite(lim) || lim <= 0) return;
 
-        const props = bar.getProps(["x", "width"], true);
+        const props = bar.getProps(["x", "width"], false);
         const yTop = yScale.getPixelForValue(top);
         const yBottom = yScale.getPixelForValue(attach);
         const boxHeight = Math.abs(yBottom - yTop);
@@ -483,6 +557,48 @@ const boxValueLabelsPlugin = {
     });
 
     ctx.restore();
+  }
+};
+
+function applyXRangeBarGeometry(chartInstance) {
+  if (!chartInstance || !_cache.useYearAxis) return;
+  const xScale = chartInstance?.scales?.x;
+  if (!xScale) return;
+
+  chartInstance.data.datasets.forEach((ds, di) => {
+    if (!ds || ds.datasetId === "sirOverlay" || ds.type === "line") return;
+    const meta = chartInstance.getDatasetMeta(di);
+    if (!meta || meta.hidden) return;
+
+    meta.data.forEach((bar, idx) => {
+      const raw = ds.data?.[idx];
+      const xStart = Number(raw?.xStart);
+      const xEnd = Number(raw?.xEnd);
+      if (!Number.isFinite(xStart) || !Number.isFinite(xEnd) || !(xEnd > xStart)) return;
+
+      const pxStart = xScale.getPixelForValue(xStart);
+      const pxEnd = xScale.getPixelForValue(xEnd);
+      if (!Number.isFinite(pxStart) || !Number.isFinite(pxEnd)) return;
+
+      const left = Math.min(pxStart, pxEnd);
+      const right = Math.max(pxStart, pxEnd);
+      const width = Math.max(1, right - left);
+      const center = (left + right) / 2;
+
+      // Mutate bar element geometry so draw + hitbox reflect the true day span.
+      bar.x = center;
+      bar.width = width;
+    });
+  });
+}
+
+const xRangeBarsPlugin = {
+  id: "xRangeBars",
+  afterDatasetsUpdate(chartInstance) {
+    applyXRangeBarGeometry(chartInstance);
+  },
+  beforeDatasetsDraw(chartInstance) {
+    applyXRangeBarGeometry(chartInstance);
   }
 };
 
@@ -854,14 +970,14 @@ function buildSlices({
     if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) continue;
     const policyStartYear = Math.min(startYear, endYear);
     const policyEndYear = Math.max(startYear, endYear);
-    const policyStartMs = startDate
+    const rawStartMs = startDate
       ? startDate.getTime()
       : startOfYearUTC(policyStartYear);
-    const policyEndMs = endDate
+    const rawEndMs = endDate
       ? endDate.getTime() + (24 * 60 * 60 * 1000 - 1)
       : endOfYearUTC(policyEndYear);
-
-    const x = useYearAxis ? String(policyStartYear) : `${dates.start} to ${dates.end}`;
+    const policyStartMs = Math.min(rawStartMs, rawEndMs);
+    const policyEndMs = Math.max(rawStartMs, rawEndMs);
 
     const attachRaw = firstPresentNum(
       getBy(r, "Attachment Point", "AttachmentPoint", "attach", "Attatchment Point")
@@ -875,7 +991,6 @@ function buildSlices({
     if (sliceLimitRaw <= 0) continue;
 
     const attach = Math.round(attachRaw);
-    const sliceLimit = Math.round(sliceLimitRaw);
     const policyLimitTypeId = String(
       getBy(r, "PolicyLimitTypeID", "Policy Limit Type ID", "Policy Limit ID")
     ).trim();
@@ -893,15 +1008,12 @@ function buildSlices({
       availability: "Available"
     };
 
-    slices.push({
-      x,
-      year: policyStartYear,
+    const baseSlice = {
       policyStartYear,
       policyEndYear,
       policyStartMs,
       policyEndMs,
       attach,
-      sliceLimit,
       PolicyID: pid,
       policy_no: info.policy_no,
       carrier: info.carrier,
@@ -914,7 +1026,48 @@ function buildSlices({
       policyLimitTypeId,
       policyLimitType,
       availability: info.availability
-    });
+    };
+
+    if (useYearAxis) {
+      // Emit one slice per covered calendar year.
+      // Keep full layer limit in each overlapped year so attachment stacks remain
+      // continuous (no artificial vertical gaps from limit-proration).
+      for (let y = policyStartYear; y <= policyEndYear; y++) {
+        const yStartMs = startOfYearUTC(y);
+        const yEndMs = endOfYearUTC(y);
+        const yNextStartMs = startOfNextYearUTC(y);
+        const overlapStart = Math.max(policyStartMs, yStartMs);
+        const overlapEnd = Math.min(policyEndMs, yEndMs);
+        if (overlapEnd < overlapStart) continue;
+        const overlapMs = overlapEnd - overlapStart + 1;
+        const yearSpanMs = yEndMs - yStartMs + 1;
+        const overlapEndExclusive = Math.min(overlapEnd + 1, yNextStartMs);
+        const xStartValue = msToYearAxisValue(overlapStart);
+        const xEndValue = msToYearAxisValue(overlapEndExclusive);
+        const xMidValue = (xStartValue + xEndValue) / 2;
+        if (!Number.isFinite(xStartValue) || !Number.isFinite(xEndValue) || !(xEndValue > xStartValue)) continue;
+
+        slices.push({
+          ...baseSlice,
+          sliceLimit: sliceLimitRaw,
+          yearOverlapStartMs: overlapStart,
+          yearOverlapEndMs: overlapEnd,
+          yearOverlapRatio: yearSpanMs > 0 ? overlapMs / yearSpanMs : 0,
+          xStartValue,
+          xEndValue,
+          xMidValue,
+          x: String(y),
+          year: y
+        });
+      }
+    } else {
+      slices.push({
+        ...baseSlice,
+        sliceLimit: sliceLimitRaw,
+        x: `${dates.start} to ${dates.end}`,
+        year: policyStartYear
+      });
+    }
   }
 
   let xLabels = [];
@@ -932,13 +1085,21 @@ function buildSlices({
 ================================ */
 
 function quotaGroupKey(s) {
-  // Quota-share is scoped within the same program/year/layer/type (+ named insured).
+  // Quota-share is scoped within the same program/layer/type (+ named insured)
+  // AND the same covered date span. This prevents sequential half-year policies
+  // in one calendar year from being mislabeled as quota share.
   const program = String(s?.insuranceProgramId || s?.insuranceProgram || "").trim();
   const year = Number.isFinite(s?.year) ? String(s.year) : String(s?.x || "").trim();
   const attach = String(s?.attach ?? "").trim();
   const limitType = String(s?.policyLimitTypeId || "").trim();
   const namedInsured = String(s?.namedInsuredId || "").trim();
-  return `${program}||${year}||${attach}||${limitType}||${namedInsured}`;
+  const spanStart = Number.isFinite(Number(s?.yearOverlapStartMs))
+    ? Number(s.yearOverlapStartMs)
+    : Number(s?.policyStartMs || 0);
+  const spanEnd = Number.isFinite(Number(s?.yearOverlapEndMs))
+    ? Number(s.yearOverlapEndMs)
+    : Number(s?.policyEndMs || 0);
+  return `${program}||${year}||${attach}||${limitType}||${namedInsured}||${spanStart}||${spanEnd}`;
 }
 
 function buildQuotaKeySet(slices) {
@@ -955,6 +1116,41 @@ function buildQuotaKeySet(slices) {
   return quotaKeySet;
 }
 
+function hasExplicitQuotaShareEvidence({ limitsRows, policyRows }) {
+  const rowSets = [limitsRows || [], policyRows || []];
+  const keyHint = /(quota|share|coinsur|co-insur|participation|participat|percent|pct)/i;
+  const valueHint = /(quota|share|co-?insur)/i;
+  const explicitQuotaPhrase = /quota\s*share/i;
+
+  const looksLikeQuotaPercent = (v) => {
+    if (v === null || v === undefined) return false;
+    const s = String(v).trim();
+    if (!s) return false;
+    const n = Number(s.replace(/[^0-9.-]/g, ""));
+    if (!Number.isFinite(n)) return false;
+    return (n > 0 && n <= 1) || (n > 0 && n <= 100);
+  };
+
+  for (const rows of rowSets) {
+    if (!rows.length) continue;
+    for (const r of rows) {
+      if (!r || typeof r !== "object") continue;
+      for (const [k, v] of Object.entries(r)) {
+        const sv = String(v ?? "").trim();
+        // Accept explicit quota-share phrases in values regardless of column name
+        // (common when stored in fields like PolicyNotes).
+        if (sv && explicitQuotaPhrase.test(sv)) return true;
+
+        if (!keyHint.test(String(k || ""))) continue;
+        if (!sv) continue;
+        if (looksLikeQuotaPercent(sv) || valueHint.test(sv)) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function applyFiltersToCache() {
   const { allSlices, allXLabels, useYearAxis, filters } = _cache;
   const startYear = Number.isFinite(filters.startYear) ? filters.startYear : null;
@@ -962,7 +1158,16 @@ function applyFiltersToCache() {
   const startDate = parseDateToUTC(filters.startDate);
   const endDate = parseDateToUTC(filters.endDate);
   const selectedProgram = String(filters.insuranceProgram || "").trim();
-  const selectedPolicyLimitType = String(filters.policyLimitType || "").trim();
+  let selectedPolicyLimitType = String(filters.policyLimitType || "").trim();
+  if (!selectedPolicyLimitType) {
+    const availableTypes = Array.from(
+      new Set((allSlices || []).map((s) => String(s?.policyLimitType || "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+    const bodilyInjury =
+      availableTypes.find((t) => String(t || "").trim().toLowerCase() === "bodily injury") || "";
+    selectedPolicyLimitType = bodilyInjury || String(availableTypes[0] || "").trim();
+    filters.policyLimitType = selectedPolicyLimitType;
+  }
 
   let filteredSlices = allSlices.slice();
   if (useYearAxis && (startYear !== null || endYear !== null || startDate || endDate)) {
@@ -1137,6 +1342,12 @@ function rebuildChart() {
     y.min = Number.isFinite(_cache.filters.zoomMin) ? _cache.filters.zoomMin : undefined;
     y.max = Number.isFinite(_cache.filters.zoomMax) ? _cache.filters.zoomMax : undefined;
   }
+  const x = chart.options?.scales?.x;
+  if (x && _cache.useYearAxis && x.type === "linear") {
+    const bounds = getYearAxisBounds(_cache.xLabels);
+    x.min = bounds.min;
+    x.max = bounds.max;
+  }
   if (chart.options?.plugins?.legend?.title) {
     chart.options.plugins.legend.title.text = legendTitleForView(currentView);
   }
@@ -1175,6 +1386,7 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   const isQuotaSlice = (s) => quotaKeySet && quotaKeySet.has(qaKey(s));
   const isUnavailable = (s) => String(s?.availability || "").toLowerCase().includes("unavail");
   const selection = getSelectionSets();
+  const usingYearAxis = !!_cache.useYearAxis;
 
   const keyOf = (s) => {
     // Collapse all unavailable slices into a single dataset/legend item in every view.
@@ -1200,40 +1412,299 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   const layerMap = new Map(); // Non-quota: one layer per policy. Quota-share: grouped by quota key.
   const groups = new Set();
 
-  for (const s of slices) {
-    const group = keyOf(s);
-    groups.add(group);
+  if (usingYearAxis) {
+    const bucketMap = new Map();
+    for (const s of slices) {
+      const group = keyOf(s);
+      groups.add(group);
 
-    const sliceQuotaKey = qaKey(s);
-    const k = group === "Quota share"
-      ? `${group}||${s.x}||${s.attach}||${sliceQuotaKey}`
-      : `${group}||${s.x}||${s.attach}||${String(s.PolicyID)}`;
-    if (!layerMap.has(k)) {
-      layerMap.set(k, {
-        group,
-        x: s.x,
-        attach: s.attach,
-        quotaGroupKey: group === "Quota share" ? sliceQuotaKey : "",
-        sumLimit: 0,
-        participants: [],
-        hasSelectionMatch: false
+      const sliceQuotaKey = qaKey(s);
+      const xStartValue = Number(s?.xStartValue);
+      const xEndValue = Number(s?.xEndValue);
+      if (!Number.isFinite(xStartValue) || !Number.isFinite(xEndValue) || !(xEndValue > xStartValue)) continue;
+      const xMidValue = (xStartValue + xEndValue) / 2;
+      const yearLabel = yearLabelFromAxisValue(xMidValue);
+      const quotaGroupKey = group === "Quota share" ? sliceQuotaKey : "";
+      // Year-mode day-accurate bucket: (group, attachment, quotaGroupKey).
+      const k = `${group}||${s.attach}||${quotaGroupKey}`;
+      if (!bucketMap.has(k)) {
+        bucketMap.set(k, {
+          group,
+          attach: Number(s?.attach || 0),
+          quotaGroupKey,
+          slices: []
+        });
+      }
+
+      bucketMap.get(k).slices.push({
+        source: s,
+        sliceQuotaKey,
+        limit: Number(s?.sliceLimit || 0),
+        xStartValue,
+        xEndValue
       });
     }
 
-    const e = layerMap.get(k);
-    e.sumLimit += s.sliceLimit;
-    if (sliceMatchesSelection(s, selection)) e.hasSelectionMatch = true;
-    e.participants.push({
-      pid: s.PolicyID,
-      carrier: s.carrier,
-      carrierGroup: s.carrierGroup,
-      availability: s.availability,
-      policy_no: s.policy_no,
-      sliceLimit: s.sliceLimit,
-      sirPerOcc: Number(s.sirPerOcc || 0),
-      sirAggregate: Number(s.sirAggregate || 0),
-      quotaGroupKey: sliceQuotaKey
-    });
+    for (const bucket of bucketMap.values()) {
+      const bounds = Array.from(
+        new Set(
+          bucket.slices.flatMap((row) => [Number(row?.xStartValue), Number(row?.xEndValue)])
+        )
+      )
+        .filter((v) => Number.isFinite(v))
+        .sort((a, b) => a - b);
+
+      const rawSegments = [];
+      for (let i = 0; i < bounds.length - 1; i++) {
+        const segStart = bounds[i];
+        const segEnd = bounds[i + 1];
+        if (!Number.isFinite(segStart) || !Number.isFinite(segEnd) || !(segEnd > segStart)) continue;
+
+        const activeRows = bucket.slices.filter((row) => {
+          const xs = Number(row?.xStartValue);
+          const xe = Number(row?.xEndValue);
+          return Number.isFinite(xs) && Number.isFinite(xe) && xs < segEnd && xe > segStart;
+        });
+        if (!activeRows.length) continue;
+
+        const participants = [];
+        let segLimit = 0;
+        let hasSelectionMatch = false;
+
+        for (const row of activeRows) {
+          const limit = Number(row?.limit || 0);
+          if (!Number.isFinite(limit) || limit <= 0) continue;
+          segLimit += limit;
+          const src = row?.source || {};
+          if (sliceMatchesSelection(src, selection)) hasSelectionMatch = true;
+          participants.push({
+            pid: src?.PolicyID,
+            carrier: src?.carrier,
+            carrierGroup: src?.carrierGroup,
+            availability: src?.availability,
+            policy_no: src?.policy_no,
+            policyStartMs: Number(src?.policyStartMs || 0),
+            policyEndMs: Number(src?.policyEndMs || 0),
+            sliceLimit: limit,
+            xStartValue: segStart,
+            xEndValue: segEnd,
+            sirPerOcc: Number(src?.sirPerOcc || 0),
+            sirAggregate: Number(src?.sirAggregate || 0),
+            quotaGroupKey: bucket.quotaGroupKey ? row?.sliceQuotaKey : ""
+          });
+        }
+        if (!(segLimit > 0)) continue;
+
+        const signature = participants
+          .map((p) => `${String(p?.pid || "")}||${Number(p?.sliceLimit || 0)}||${String(p?.quotaGroupKey || "")}`)
+          .sort()
+          .join("##");
+        rawSegments.push({
+          segStart,
+          segEnd,
+          segLimit,
+          participants,
+          hasSelectionMatch,
+          signature
+        });
+      }
+
+      // Merge adjacent segments when the active participant set is unchanged.
+      const mergedSegments = [];
+      const eps = 1e-9;
+      for (const seg of rawSegments) {
+        const prev = mergedSegments[mergedSegments.length - 1];
+        if (
+          prev &&
+          Math.abs(Number(prev.segEnd) - Number(seg.segStart)) < eps &&
+          prev.signature === seg.signature &&
+          Math.abs(Number(prev.segLimit) - Number(seg.segLimit)) < eps
+        ) {
+          prev.segEnd = seg.segEnd;
+          prev.hasSelectionMatch = prev.hasSelectionMatch || seg.hasSelectionMatch;
+        } else {
+          mergedSegments.push({ ...seg });
+        }
+      }
+
+      for (const seg of mergedSegments) {
+        const segMid = (Number(seg.segStart) + Number(seg.segEnd)) / 2;
+        const yearLabel = yearLabelFromAxisValue(segMid);
+        const layerKey = `${bucket.group}||${bucket.attach}||${Number(seg.segStart).toFixed(9)}||${Number(seg.segEnd).toFixed(9)}||${bucket.quotaGroupKey}`;
+        layerMap.set(layerKey, {
+          group: bucket.group,
+          x: yearLabel,
+          yearLabel,
+          xStartValue: Number(seg.segStart),
+          xEndValue: Number(seg.segEnd),
+          xMidValue: segMid,
+          attach: bucket.attach,
+          quotaGroupKey: bucket.quotaGroupKey,
+          sumLimit: Number(seg.segLimit),
+          participants: seg.participants,
+          hasSelectionMatch: !!seg.hasSelectionMatch
+        });
+      }
+    }
+
+    /*
+      Legacy event-based aggregation retained for reference:
+      The boundary-segmentation above provides exact day-level rendering by
+      attachment and avoids year-bucket overcounting.
+    */
+    /*
+    for (const bucket of bucketMap.values()) {
+      const events = [];
+      for (const row of bucket.slices) {
+        const lim = Number(row.limit || 0);
+        if (!Number.isFinite(lim) || lim <= 0) continue;
+        const startMs = Number(row.overlapStartMs);
+        const endMs = Number(row.overlapEndMs);
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
+        const lo = Math.min(startMs, endMs);
+        const hi = Math.max(startMs, endMs);
+        const endExclusive = hi + 1;
+        const token = `${String(row.source?.PolicyID || "")}||${lo}||${hi}||${lim}`;
+        events.push({ t: lo, delta: +lim, token, row });
+        events.push({ t: endExclusive, delta: -lim, token, row });
+      }
+      if (!events.length) continue;
+
+      // At equal timestamps process removals before adds so adjacent periods
+      // do not count as concurrent overlap.
+      events.sort((a, b) => (a.t - b.t) || (a.delta - b.delta));
+
+      let running = 0;
+      let maxRunning = 0;
+      const active = new Map();
+      let peakParticipants = [];
+      let hasSelectionMatch = false;
+
+      for (const ev of events) {
+        if (ev.delta < 0) {
+          const existing = active.get(ev.token);
+          if (existing) {
+            running = Math.max(0, running - Number(existing?.sliceLimit || 0));
+            active.delete(ev.token);
+          }
+        } else {
+          const p = {
+            pid: ev.row.source?.PolicyID,
+            carrier: ev.row.source?.carrier,
+            carrierGroup: ev.row.source?.carrierGroup,
+            availability: ev.row.source?.availability,
+            policy_no: ev.row.source?.policy_no,
+            policyStartMs: Number(ev.row.source?.policyStartMs || 0),
+            policyEndMs: Number(ev.row.source?.policyEndMs || 0),
+            sliceLimit: Number(ev.row.limit || 0),
+            xStartValue: Number(bucket.xStartValue),
+            xEndValue: Number(bucket.xEndValue),
+            sirPerOcc: Number(ev.row.source?.sirPerOcc || 0),
+            sirAggregate: Number(ev.row.source?.sirAggregate || 0),
+            quotaGroupKey: ev.row.sliceQuotaKey
+          };
+          active.set(ev.token, p);
+          running += p.sliceLimit;
+        }
+
+        if (running > maxRunning) {
+          maxRunning = running;
+          peakParticipants = Array.from(active.values());
+          hasSelectionMatch = peakParticipants.some((p) =>
+            sliceMatchesSelection(
+              { carrier: p.carrier, carrierGroup: p.carrierGroup },
+              selection
+            )
+          );
+        }
+      }
+
+      if (!(maxRunning > 0)) continue;
+      layerMap.set(`${bucket.group}||${bucket.yearLabel}||${bucket.attach}||${bucket.quotaGroupKey}`, {
+        group: bucket.group,
+        x: bucket.x,
+        yearLabel: bucket.yearLabel,
+        xStartValue: bucket.xStartValue,
+        xEndValue: bucket.xEndValue,
+        xMidValue: bucket.xMidValue,
+        attach: bucket.attach,
+        quotaGroupKey: bucket.quotaGroupKey,
+        sumLimit: maxRunning,
+        participants: peakParticipants,
+        hasSelectionMatch
+      });
+    }
+    */
+  } else {
+    for (const s of slices) {
+      const group = keyOf(s);
+      groups.add(group);
+
+      const sliceQuotaKey = qaKey(s);
+      const quotaGroupKey = group === "Quota share" ? sliceQuotaKey : "";
+      const k = `${group}||${s.x}||${s.attach}||${quotaGroupKey}`;
+      if (!layerMap.has(k)) {
+        layerMap.set(k, {
+          group,
+          x: s.x,
+          yearLabel: String(s?.x ?? ""),
+          xStartValue: null,
+          xEndValue: null,
+          xMidValue: null,
+          attach: s.attach,
+          quotaGroupKey,
+          sumLimit: 0,
+          participants: [],
+          hasSelectionMatch: false
+        });
+      }
+
+      const e = layerMap.get(k);
+      e.sumLimit += Number(s?.sliceLimit || 0);
+      if (sliceMatchesSelection(s, selection)) e.hasSelectionMatch = true;
+      e.participants.push({
+        pid: s.PolicyID,
+        carrier: s.carrier,
+        carrierGroup: s.carrierGroup,
+        availability: s.availability,
+        policy_no: s.policy_no,
+        policyStartMs: Number(s.policyStartMs || 0),
+        policyEndMs: Number(s.policyEndMs || 0),
+        sliceLimit: Number(s?.sliceLimit || 0),
+        xStartValue: null,
+        xEndValue: null,
+        sirPerOcc: Number(s.sirPerOcc || 0),
+        sirAggregate: Number(s.sirAggregate || 0),
+        quotaGroupKey: sliceQuotaKey
+      });
+    }
+  }
+
+  if (usingYearAxis) {
+    const selectedCarriers = normalizeStringList(_cache.filters?.carriers);
+    const debugGraniteOnly = selectedCarriers.length === 1 &&
+      selectedCarriers[0].toLowerCase() === "granite state insurance company";
+    if (debugGraniteOnly) {
+      const rows = Array.from(layerMap.values())
+        .filter((e) => String(e?.group || "").toLowerCase() === "granite state insurance company")
+        .filter((e) => String(e?.yearLabel || "") === "1985")
+        .sort((a, b) => Number(a.attach || 0) - Number(b.attach || 0));
+      if (rows.length) {
+        console.group("[CoverageChart Debug] Granite State 1985 bands");
+        for (const e of rows) {
+          const start = Number(e.attach || 0);
+          const totalLayerLimit = Number(e.sumLimit || 0);
+          const end = start + totalLayerLimit;
+          console.log({
+            AttachmentPoint: start,
+            TotalLayerLimit: totalLayerLimit,
+            CalculatedStart: start,
+            CalculatedEnd: end
+          });
+        }
+        console.groupEnd();
+      }
+    }
   }
 
   const groupList = Array.from(groups);
@@ -1322,7 +1793,10 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
       const isQuotaShare = !!(e.quotaGroupKey && quotaKeySet && quotaKeySet.has(e.quotaGroupKey));
 
       points.push({
-        x: e.x,
+        x: usingYearAxis && Number.isFinite(Number(e.xMidValue)) ? Number(e.xMidValue) : e.x,
+        xStart: usingYearAxis && Number.isFinite(Number(e.xStartValue)) ? Number(e.xStartValue) : null,
+        xEnd: usingYearAxis && Number.isFinite(Number(e.xEndValue)) ? Number(e.xEndValue) : null,
+        yearLabel: e.yearLabel || String(e.x ?? ""),
         y: [e.attach, top],
         attach: e.attach,
         top,
@@ -1336,6 +1810,15 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
     }
 
     points.sort((a, b) => {
+      if (usingYearAxis) {
+        const ax = Number(a?.xStart);
+        const bx = Number(b?.xStart);
+        if (Number.isFinite(ax) && Number.isFinite(bx) && ax !== bx) return ax - bx;
+        const aend = Number(a?.xEnd);
+        const bend = Number(b?.xEnd);
+        if (Number.isFinite(aend) && Number.isFinite(bend) && aend !== bend) return aend - bend;
+        return a.attach - b.attach;
+      }
       const ax = labelIndex.get(a.x) ?? 1e9;
       const bx = labelIndex.get(b.x) ?? 1e9;
       if (ax !== bx) return ax - bx;
@@ -1359,8 +1842,6 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
       bg = colorFromString(group);
     }
 
-    const hasHighlightedPoint = points.some((p) => p.isHighlighted);
-    const datasetInFocus = !selection.active || hasHighlightedPoint;
     const mutedFill = "rgba(255,255,255,0.92)";
     const mutedBorder = "rgba(0,0,0,0.9)";
     const isQuotaDataset = group === "Quota share";
@@ -1379,14 +1860,19 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
       inflateAmount: 0.6,
 
       backgroundColor: (context) => {
-        if (!datasetInFocus) return mutedFill;
         const raw = context?.raw || null;
+        const pointInFocus = !selection.active || !!raw?.isHighlighted;
+        if (!pointInFocus) return mutedFill;
         if (view === "carrier" && isQuotaDataset && raw?.isQuotaShare) {
           return quotaGradientForCarrierView(context, raw);
         }
         return bg;
       },
-      borderColor: datasetInFocus ? "rgba(11, 17, 27, 0.62)" : mutedBorder,
+      borderColor: (context) => {
+        const raw = context?.raw || null;
+        const pointInFocus = !selection.active || !!raw?.isHighlighted;
+        return pointInFocus ? "rgba(11, 17, 27, 0.62)" : mutedBorder;
+      },
       borderWidth: 1,
       borderRadius: 2,
       borderSkipped: false
@@ -1403,9 +1889,14 @@ function getSirValueFromSlice(slice, sirMode) {
 function buildSirDataset({ slices, xLabels, sirMode }) {
   if (!sirMode || sirMode === "off") return null;
   const mode = sirMode === "aggregate" ? "aggregate" : "perOcc";
+  const usingYearAxis = !!_cache.useYearAxis;
   const byX = new Map();
   for (const s of slices || []) {
-    const x = String(s?.x ?? "");
+    const x = usingYearAxis
+      ? Number.isFinite(Number(s?.year))
+        ? String(Number(s.year))
+        : String(s?.x ?? "")
+      : String(s?.x ?? "");
     if (!x) continue;
     const v = getSirValueFromSlice(s, mode);
     if (!Number.isFinite(v) || v <= 0) continue;
@@ -1413,10 +1904,18 @@ function buildSirDataset({ slices, xLabels, sirMode }) {
   }
 
   const color = mode === "aggregate" ? "#f97316" : "#facc15";
-  const data = (xLabels || []).map((x) => {
-    const v = byX.get(String(x));
-    return { x: String(x), y: Number.isFinite(v) ? v : null };
-  });
+  const data = (xLabels || [])
+    .map((x) => {
+      const yearLabel = String(x ?? "");
+      const v = byX.get(yearLabel);
+      if (usingYearAxis) {
+        const yr = Number(yearLabel);
+        if (!Number.isFinite(yr)) return null;
+        return { x: yr, y: Number.isFinite(v) ? v : null, yearLabel };
+      }
+      return { x: yearLabel, y: Number.isFinite(v) ? v : null, yearLabel };
+    })
+    .filter(Boolean);
 
   return {
     datasetId: "sirOverlay",
@@ -1560,7 +2059,7 @@ function getAggregatedReportRows() {
       const limit = Number(p?.sumLimit ?? (Number(p?.top || 0) - Number(p?.attach || 0)));
       const participants = Array.isArray(p?.participants) ? p.participants.length : 0;
       rows.push({
-        Year: p?.x ?? "",
+        Year: p?.yearLabel ?? p?.x ?? "",
         Group: group,
         Attachment: Number(p?.attach || 0),
         TotalLimit: Number.isFinite(limit) ? limit : 0,
@@ -1871,9 +2370,11 @@ export function getYearLabelAnchors() {
   const xScale = chart?.scales?.x;
   if (!xScale || !Array.isArray(_cache.xLabels)) return [];
   const anchors = [];
+  const isLinearYearAxis = _cache.useYearAxis && xScale.type === "linear";
   for (const lbl of _cache.xLabels) {
     const key = String(lbl ?? "");
-    const px = Number(xScale.getPixelForValue(key));
+    const value = isLinearYearAxis ? Number(key) : key;
+    const px = Number(xScale.getPixelForValue(value));
     if (!Number.isFinite(px)) continue;
     anchors.push({ x: key, px });
   }
@@ -2047,7 +2548,8 @@ export async function renderCoverageChart({
     useYearAxis
   });
 
-  const quotaKeySet = buildQuotaKeySet(built.slices);
+  const quotaEnabled = hasExplicitQuotaShareEvidence({ limitsRows, policyRows });
+  const quotaKeySet = quotaEnabled ? buildQuotaKeySet(built.slices) : new Set();
 
   _cache = {
     allSlices: built.slices,
@@ -2080,6 +2582,15 @@ export async function renderCoverageChart({
     }
   };
 
+  // Default limit-type filter on first render to avoid stacking multiple
+  // limit types (for example BI + PD) at the same attachment.
+  if (!String(_cache.filters.policyLimitType || "").trim()) {
+    const limitTypeOptions = getFilterOptions().policyLimitTypes || [];
+    const bodilyInjury =
+      limitTypeOptions.find((t) => String(t || "").trim().toLowerCase() === "bodily injury") || "";
+    _cache.filters.policyLimitType = bodilyInjury || String(limitTypeOptions[0] || "").trim();
+  }
+
   applyFiltersToCache();
 
   const datasets = buildDatasetsForView({
@@ -2095,6 +2606,7 @@ export async function renderCoverageChart({
     xLabels: _cache.xLabels,
     sirMode: _cache.filters?.sirMode
   });
+  const yearAxisBounds = getYearAxisBounds(_cache.xLabels);
 
   if (chart) chart.destroy();
 
@@ -2104,7 +2616,7 @@ export async function renderCoverageChart({
       labels: _cache.xLabels,
       datasets: sirDataset ? [...datasets, sirDataset] : datasets
     },
-    plugins: [outlineBarsPlugin, quotaShareGuidesPlugin, boxValueLabelsPlugin, yearAvailableTotalsPlugin],
+    plugins: [xRangeBarsPlugin, outlineBarsPlugin, quotaShareGuidesPlugin, boxValueLabelsPlugin, yearAvailableTotalsPlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -2151,7 +2663,7 @@ export async function renderCoverageChart({
           callbacks: {
             title: (items) => {
               const raw = items?.[0]?.raw || {};
-              const yr = String(raw.x ?? "");
+              const yr = String(raw.yearLabel ?? raw.x ?? "");
               const ds = items?.[0]?.dataset || {};
               if (ds?.datasetId === "sirOverlay") return `${yr} — ${ds.label || "SIR"}`;
 
@@ -2175,6 +2687,26 @@ export async function renderCoverageChart({
               lines.push(`Attach: ${money(attach)}`);
               lines.push(`Limit: ${money(lim)}`);
               lines.push(`Top: ${money(top)}`);
+              const parts = Array.isArray(r.participants) ? r.participants : [];
+              const startVals = parts
+                .map((p) => Number(p?.policyStartMs || 0))
+                .filter((v) => Number.isFinite(v) && v > 0);
+              const endVals = parts
+                .map((p) => Number(p?.policyEndMs || 0))
+                .filter((v) => Number.isFinite(v) && v > 0);
+              if (startVals.length && endVals.length) {
+                const minStart = Math.min(...startVals);
+                const maxStart = Math.max(...startVals);
+                const minEnd = Math.min(...endVals);
+                const maxEnd = Math.max(...endVals);
+                if (minStart === maxStart && minEnd === maxEnd) {
+                  lines.push(`Policy Start: ${formatFullDateUTC(minStart)}`);
+                  lines.push(`Policy End: ${formatFullDateUTC(maxEnd)}`);
+                } else {
+                  lines.push(`Policy Start (earliest): ${formatFullDateUTC(minStart)}`);
+                  lines.push(`Policy End (latest): ${formatFullDateUTC(maxEnd)}`);
+                }
+              }
               const isPrimaryLayer = Number(attach) <= 0;
               if (isPrimaryLayer) {
                 const sirValsPerOcc = (Array.isArray(r.participants) ? r.participants : [])
@@ -2195,7 +2727,6 @@ export async function renderCoverageChart({
                 }
               }
 
-              const parts = Array.isArray(r.participants) ? r.participants : [];
               const quotaParts = r.isQuotaShare && r.quotaGroupKey
                 ? parts.filter((p) => String(p?.quotaGroupKey || "") === String(r.quotaGroupKey))
                 : parts;
@@ -2233,26 +2764,57 @@ export async function renderCoverageChart({
       },
 
       scales: {
-        x: {
-          type: "category",
-          offset: true,
-          grid: {
-            display: true,
-            color: themeColors.xGrid,
-            lineWidth: 1
-          },
-          ticks: {
-            color: themeColors.axisTicks,
-            autoSkip: false,
-            maxRotation: 0,
-            minRotation: 0
-          },
-          title: {
-            display: true,
-            text: "Policy Years",
-            color: themeColors.yTitle
-          }
-        },
+        x: useYearAxis
+          ? {
+              type: "linear",
+              offset: false,
+              min: yearAxisBounds.min,
+              max: yearAxisBounds.max,
+              grid: {
+                display: true,
+                color: themeColors.xGrid,
+                lineWidth: 1
+              },
+              ticks: {
+                color: themeColors.axisTicks,
+                stepSize: 1,
+                autoSkip: false,
+                maxRotation: 0,
+                minRotation: 0,
+                callback: (v) => {
+                  const n = Number(v);
+                  if (!Number.isFinite(n)) return "";
+                  const yr = Math.round(n);
+                  const hasYear = (_cache.xLabels || []).some((lbl) => Number(lbl) === yr);
+                  return hasYear ? String(yr) : "";
+                }
+              },
+              title: {
+                display: true,
+                text: "Policy Years",
+                color: themeColors.yTitle
+              }
+            }
+          : {
+              type: "category",
+              offset: true,
+              grid: {
+                display: true,
+                color: themeColors.xGrid,
+                lineWidth: 1
+              },
+              ticks: {
+                color: themeColors.axisTicks,
+                autoSkip: false,
+                maxRotation: 0,
+                minRotation: 0
+              },
+              title: {
+                display: true,
+                text: "Policy Years",
+                color: themeColors.yTitle
+              }
+            },
         y: {
           beginAtZero: true,
           grid: {

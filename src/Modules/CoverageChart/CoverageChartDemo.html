@@ -275,16 +275,20 @@
         function computeAvailableCoverageByYear(slices, carriers, carrierGroups) {
           const carrierSet = new Set(carriers);
           const groupSet = new Set(carrierGroups);
-          const byYear = new Map();
+          const byYearTop = new Map();
           for (const s of slices || []) {
             if (carrierSet.size > 0 && !carrierSet.has(String(s?.carrier || ""))) continue;
             if (groupSet.size > 0 && !groupSet.has(String(s?.carrierGroup || ""))) continue;
             if (String(s?.availability || "").toLowerCase().includes("unavail")) continue;
             const yearKey = String(s?.x ?? "").trim();
             if (!yearKey) continue;
-            byYear.set(yearKey, (byYear.get(yearKey) || 0) + Number(s?.sliceLimit || 0));
+            const attach = Number(s?.attach || 0);
+            const limit = Number(s?.sliceLimit || 0);
+            const top = attach + limit;
+            if (!Number.isFinite(top) || !Number.isFinite(limit) || limit <= 0) continue;
+            byYearTop.set(yearKey, Math.max(byYearTop.get(yearKey) || 0, top));
           }
-          return Array.from(byYear.entries())
+          return Array.from(byYearTop.entries())
             .sort((a, b) => Number(a[0]) - Number(b[0]))
             .map(([year, total]) => ({ year, total }));
         }
@@ -366,11 +370,30 @@
         }
 
         const filterOptions = getFilterOptions();
-        function buildCheckboxMenu(container, values, inputName) {
+        function buildCheckboxMenu(container, values, inputName, placeholder) {
           container.innerHTML = "";
+
+          const searchWrap = document.createElement("div");
+          searchWrap.className = "multiSearchWrap";
+          const searchInput = document.createElement("input");
+          searchInput.className = "multiSearchInput";
+          searchInput.type = "search";
+          searchInput.placeholder = placeholder;
+          searchInput.autocomplete = "off";
+          searchInput.spellcheck = false;
+          searchWrap.appendChild(searchInput);
+
+          const optionsWrap = document.createElement("div");
+          optionsWrap.className = "multiOptionsList";
+          const empty = document.createElement("div");
+          empty.className = "multiDropdownEmpty";
+          empty.textContent = "No matches";
+          empty.hidden = true;
+
           for (const value of values) {
             const row = document.createElement("label");
             row.className = "multiOption";
+            row.dataset.search = String(value).toLowerCase();
 
             const cb = document.createElement("input");
             cb.type = "checkbox";
@@ -382,12 +405,34 @@
 
             row.appendChild(cb);
             row.appendChild(text);
-            container.appendChild(row);
+            optionsWrap.appendChild(row);
           }
+
+          searchInput.addEventListener("input", () => {
+            const q = String(searchInput.value || "").trim().toLowerCase();
+            let visibleCount = 0;
+            for (const row of optionsWrap.querySelectorAll(".multiOption")) {
+              const match = !q || String(row.dataset.search || "").includes(q);
+              row.hidden = !match;
+              if (match) visibleCount += 1;
+            }
+            empty.hidden = visibleCount > 0;
+          });
+
+          container.appendChild(searchWrap);
+          container.appendChild(optionsWrap);
+          container.appendChild(empty);
         }
 
-        buildCheckboxMenu(carrierDropdownMenu, filterOptions.carriers, "carrier_filter");
-        buildCheckboxMenu(carrierGroupDropdownMenu, filterOptions.carrierGroups, "carrier_group_filter");
+        function resetCheckboxMenuSearch(container) {
+          const input = container.querySelector(".multiSearchInput");
+          if (!input) return;
+          input.value = "";
+          input.dispatchEvent(new Event("input"));
+        }
+
+        buildCheckboxMenu(carrierDropdownMenu, filterOptions.carriers, "carrier_filter", "Search carriers...");
+        buildCheckboxMenu(carrierGroupDropdownMenu, filterOptions.carrierGroups, "carrier_group_filter", "Search carrier groups...");
         const policyLimitTypeValues = filterOptions.policyLimitTypes || [];
         for (const policyLimitType of policyLimitTypeValues) {
           const opt = document.createElement("option");
@@ -576,6 +621,8 @@
         function resetEntityFilterUI() {
           clearCheckboxMenu(carrierDropdownMenu);
           clearCheckboxMenu(carrierGroupDropdownMenu);
+          resetCheckboxMenuSearch(carrierDropdownMenu);
+          resetCheckboxMenuSearch(carrierGroupDropdownMenu);
           updateDropdownLabel(carrierDropdownLabel, [], "All carriers", "carrier");
           updateDropdownLabel(carrierGroupDropdownLabel, [], "All carrier groups", "group");
         }

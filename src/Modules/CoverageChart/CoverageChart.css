@@ -403,6 +403,45 @@ body{
   box-shadow: 0 12px 24px rgba(0,0,0,0.28);
 }
 
+.multiSearchWrap{
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 2px 2px 6px;
+  background: inherit;
+}
+
+.multiSearchInput{
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 9px;
+  color: var(--text);
+  background: color-mix(in oklab, var(--bg2) 86%, white 14%);
+  font-size: 12px;
+}
+
+.multiSearchInput::placeholder{
+  color: var(--muted);
+}
+
+.multiSearchInput:focus{
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+
+.multiOptionsList{
+  display: grid;
+  gap: 1px;
+}
+
+.multiDropdownEmpty{
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .multiOption{
   display: flex;
   align-items: center;
@@ -415,6 +454,14 @@ body{
   line-height: 1.15;
   font-size: 11px;
   transition: background 120ms ease, border-color 120ms ease;
+}
+
+.multiOption[hidden]{
+  display: none !important;
+}
+
+.multiDropdownEmpty[hidden]{
+  display: none !important;
 }
 
 .controls label.multiOption{
@@ -587,6 +634,10 @@ body{
   flex-direction: column;
   gap: 8px;
   min-height: 300px;
+}
+
+.chartWrap[hidden]{
+  display: none !important;
 }
 
 .chartHint{
