@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Executive Summary</title>
+  <link rel="stylesheet" href="/Modules/CoverageChart/CoverageChart.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <nav class="pageNav" aria-label="Dashboard Navigation">
+      <a class="pageNavTab" href="/Modules/CoverageChart/CoverageChartDemo.html">Coverage Chart</a>
+      <a class="pageNavTab isActive" href="/Modules/CoverageChart/ExecutiveSummary.html" aria-current="page">
+        Executive Summary
+      </a>
+    </nav>
+
+    <header class="topbar">
+      <div class="title">
+        <h1>Insurance Program Executive Summary</h1>
+        <div class="subtitle">Policyholder-side exposure and concentration analysis for litigation and mediation</div>
+        <div class="themeRow">
+          <span id="themeLabel" class="themeLabel">Dark mode</span>
+          <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
+            <span class="themeToggleThumb" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="controlBar" aria-label="Primary Controls">
+          <div class="controlPanel controlPanel--view">
+            <div class="controlBlock">
+              <label for="viewSelect">View</label>
+              <select id="viewSelect">
+                <option value="carrier">Carrier</option>
+                <option value="carrierGroup">Carrier Group</option>
+                <option value="availability">Availability</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--program">
+            <div class="controlBlock">
+              <label for="insuranceProgramSelect">Insurance Program</label>
+              <select id="insuranceProgramSelect"></select>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--years">
+            <div class="inlinePair">
+              <div class="controlBlock">
+                <label for="startYearSelect">Start Year</label>
+                <select id="startYearSelect">
+                  <option value="">All</option>
+                </select>
+              </div>
+              <div class="controlBlock">
+                <label for="endYearSelect">End Year</label>
+                <select id="endYearSelect">
+                  <option value="">All</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--zoom">
+            <div class="inlinePair">
+              <div class="controlBlock">
+                <label for="zoomMinInput">Zoom Min ($)</label>
+                <input id="zoomMinInput" type="text" inputmode="numeric" placeholder="0" />
+              </div>
+              <div class="controlBlock">
+                <label for="zoomMaxInput">Zoom Max ($)</label>
+                <input id="zoomMaxInput" type="text" inputmode="numeric" placeholder="Auto" />
+              </div>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--reset">
+            <button type="button" id="resetAll" class="primaryBtn">Reset All</button>
+          </div>
+        </div>
+
+        <div class="filterBar" aria-label="Focus Filters">
+          <div class="controlPanel">
+            <div class="controlBlock">
+              <label for="carrierDropdown">Carrier</label>
+              <details id="carrierDropdown" class="multiDropdown">
+                <summary class="multiDropdownSummary">
+                  <span id="carrierDropdownLabel">All Carriers</span>
+                </summary>
+                <div id="carrierDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier filters"></div>
+              </details>
+            </div>
+          </div>
+
+          <div class="controlPanel">
+            <div class="controlBlock">
+              <label for="carrierGroupDropdown">Carrier Group</label>
+              <details id="carrierGroupDropdown" class="multiDropdown">
+                <summary class="multiDropdownSummary">
+                  <span id="carrierGroupDropdownLabel">All Carrier Groups</span>
+                </summary>
+                <div id="carrierGroupDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier group filters"></div>
+              </details>
+            </div>
+          </div>
+
+          <div class="controlPanel">
+            <div class="controlBlock">
+              <label for="policyLimitTypeSelect">Policy Limit Type</label>
+              <select id="policyLimitTypeSelect"></select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="executiveDashboard" aria-label="Executive Policyholder Summary">
+        <div id="execKpiRow" class="kpiRow">
+          <article class="kpiCard">
+            <div class="kpiLabel">Total Gross Limits</div>
+            <div id="execKpiGross" class="kpiValue">$0</div>
+          </article>
+          <article class="kpiCard">
+            <div class="kpiLabel">Total Collectible Limits</div>
+            <div id="execKpiCollectible" class="kpiValue">$0</div>
+          </article>
+          <article class="kpiCard">
+            <div class="kpiLabel">% Collectible</div>
+            <div id="execKpiCollectiblePct" class="kpiValue">0%</div>
+          </article>
+          <article class="kpiCard">
+            <div class="kpiLabel">Largest Carrier Group %</div>
+            <div id="execKpiLargestGroupPct" class="kpiValue">0%</div>
+          </article>
+        </div>
+
+        <div class="executiveGrid">
+          <section class="executivePanel">
+            <div class="executivePanelTitle">Total Limits by Carrier Group</div>
+            <div id="execConcentrationText" class="execConcentrationText">Top 3 Groups Control 0% of Tower</div>
+            <div class="executiveCanvasWrap">
+              <canvas id="execCarrierGroupCanvas"></canvas>
+            </div>
+          </section>
+
+          <section class="executivePanel">
+            <div class="executivePanelTitle">Total Limits by Policy Limit Type</div>
+            <div class="executiveCanvasWrap">
+              <canvas id="execLimitTypeCanvas"></canvas>
+            </div>
+          </section>
+        </div>
+
+        <section class="executivePanel executivePanel--full">
+          <div class="executivePanelTitle">Total Limits by Policy Year</div>
+          <div class="executiveCanvasWrap executiveCanvasWrap--wide">
+            <canvas id="execYearTrendCanvas"></canvas>
+          </div>
+        </section>
+      </section>
+
+      <div class="chartWrap">
+        <div class="chartTopRow">
+          <div class="exportMenu" id="exportMenu">
+            <button id="exportBtn" class="exportBtn" type="button" aria-expanded="false" aria-controls="exportMenuPanel">Export</button>
+            <div id="exportMenuPanel" class="exportMenuPanel" hidden>
+              <button id="exportPngBtn" type="button">Export Chart (PNG)</button>
+              <button id="exportCsvBtn" type="button">Export Data (CSV)</button>
+              <button id="exportPdfBtn" type="button">Export Report (PDF)</button>
+            </div>
+          </div>
+        </div>
+        <div id="activeFilterSummary" class="filterSummary"></div>
+        <div class="chartViewport">
+          <div class="chartSurface">
+            <canvas id="coverageCanvas"></canvas>
+          </div>
+        </div>
+      </div>
+      <pre id="errorBox" class="error" style="display:none;"></pre>
+    </main>
+  </div>
+
+  <script type="module">
+    import {
+      renderCoverageChart,
+      setView,
+      getFilterOptions,
+      getYearBounds,
+      setYearRange,
+      resetYearRange,
+      setInsuranceProgramFilter,
+      resetInsuranceProgramFilter,
+      setPolicyLimitTypeFilter,
+      resetPolicyLimitTypeFilter,
+      setChartTheme,
+      exportChartAsPNG,
+      exportFilteredCSV,
+      exportReportPDF,
+      setEntityFilters,
+      resetEntityFilters,
+      setZoomRange,
+      resetZoomRange,
+      getFilteredSlices
+    } from "/Modules/CoverageChart/CoverageChart.js";
+
+    let execCarrierGroupChart = null;
+    let execLimitTypeChart = null;
+    let execYearTrendChart = null;
+
+    function compactMoney(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "$0";
+      const abs = Math.abs(n);
+      const sign = n < 0 ? "-" : "";
+      if (abs >= 1e9) return `$${sign}${(abs / 1e9).toFixed(abs >= 1e10 ? 0 : 1).replace(/\.0$/, "")}B`;
+      if (abs >= 1e6) return `$${sign}${(abs / 1e6).toFixed(abs >= 1e7 ? 0 : 1).replace(/\.0$/, "")}M`;
+      if (abs >= 1e3) return `$${sign}${(abs / 1e3).toFixed(abs >= 1e4 ? 0 : 1).replace(/\.0$/, "")}K`;
+      return `$${sign}${Math.round(abs).toLocaleString()}`;
+    }
+
+    function money(v) {
+      return `$${Number(v || 0).toLocaleString()}`;
+    }
+
+    function getExecTheme() {
+      const light = document.documentElement.dataset.theme === "light";
+      return light
+        ? {
+            text: "rgba(15, 23, 42, 0.92)",
+            axis: "rgba(15, 23, 42, 0.9)",
+            grid: "rgba(15, 23, 42, 0.12)",
+            bar: "rgba(37, 99, 235, 0.62)",
+            barTop: "rgba(29, 78, 216, 0.9)",
+            barMuted: "rgba(15, 23, 42, 0.25)",
+            line: "#0f766e"
+          }
+        : {
+            text: "rgba(241, 245, 249, 0.95)",
+            axis: "rgba(226, 232, 240, 0.92)",
+            grid: "rgba(148, 163, 184, 0.2)",
+            bar: "rgba(96, 165, 250, 0.62)",
+            barTop: "rgba(147, 197, 253, 0.9)",
+            barMuted: "rgba(148, 163, 184, 0.45)",
+            line: "#34d399"
+          };
+    }
+
+    function showError(err) {
+      const box = document.getElementById("errorBox");
+      box.style.display = "block";
+      box.textContent =
+        "ERROR:\n" + (err?.stack || err?.message || String(err)) +
+        "\n\nQuick checks:" +
+        "\n- Chart.js loaded (CDN)" +
+        "\n- CSV URLs correct" +
+        "\n- Server is serving /data and /Modules";
+    }
+
+    function buildExecutiveMetrics(selectedCarriers, selectedCarrierGroups) {
+      const carrierSet = new Set(selectedCarriers || []);
+      const groupSet = new Set(selectedCarrierGroups || []);
+      const hasEntityFilter = carrierSet.size > 0 || groupSet.size > 0;
+
+      const slices = (getFilteredSlices() || []).filter((s) => {
+        if (!hasEntityFilter) return true;
+        const carrierOk = carrierSet.size === 0 || carrierSet.has(String(s?.carrier || ""));
+        const groupOk = groupSet.size === 0 || groupSet.has(String(s?.carrierGroup || ""));
+        return carrierOk && groupOk;
+      });
+
+      const gross = slices.reduce((sum, s) => sum + Number(s?.sliceLimit || 0), 0);
+      const collectible = slices.reduce((sum, s) => {
+        const unavailable = String(s?.availability || "").toLowerCase().includes("unavail");
+        return sum + (unavailable ? 0 : Number(s?.sliceLimit || 0));
+      }, 0);
+
+      const byGroup = new Map();
+      const byLimitType = new Map();
+      const byYear = new Map();
+
+      for (const s of slices) {
+        const limit = Number(s?.sliceLimit || 0);
+        const unavailable = String(s?.availability || "").toLowerCase().includes("unavail");
+        const group = String(s?.carrierGroup || "(unknown group)");
+        const limitType = String(s?.policyLimitType || s?.policyLimitTypeId || "(unknown type)");
+        const year = Number.isFinite(s?.year) ? Number(s.year) : Number(s?.x);
+        const yearKey = Number.isFinite(year) ? year : String(s?.x || "");
+
+        byGroup.set(group, (byGroup.get(group) || 0) + limit);
+        byLimitType.set(limitType, (byLimitType.get(limitType) || 0) + limit);
+
+        const y = byYear.get(yearKey) || { year: yearKey, gross: 0, collectible: 0 };
+        y.gross += limit;
+        if (!unavailable) y.collectible += limit;
+        byYear.set(yearKey, y);
+      }
+
+      const groups = Array.from(byGroup.entries()).map(([group, total]) => ({ group, total })).sort((a, b) => b.total - a.total);
+      const limitTypes = Array.from(byLimitType.entries()).map(([type, total]) => ({ type, total })).sort((a, b) => b.total - a.total);
+      const years = Array.from(byYear.values()).sort((a, b) => {
+        const ay = Number(a.year);
+        const by = Number(b.year);
+        if (Number.isFinite(ay) && Number.isFinite(by)) return ay - by;
+        return String(a.year).localeCompare(String(b.year));
+      });
+
+      const largestGroup = groups.length ? groups[0].total : 0;
+      const top3 = groups.slice(0, 3).reduce((sum, g) => sum + g.total, 0);
+
+      const metrics = {
+        gross,
+        collectible,
+        collectiblePct: gross > 0 ? collectible / gross : 0,
+        largestGroupPct: gross > 0 ? largestGroup / gross : 0,
+        top3Pct: gross > 0 ? top3 / gross : 0,
+        groups,
+        limitTypes,
+        years
+      };
+
+      console.log("[Executive] Metrics", {
+        gross: metrics.gross,
+        collectible: metrics.collectible,
+        collectiblePct: metrics.collectiblePct,
+        largestGroupPct: metrics.largestGroupPct,
+        top3Pct: metrics.top3Pct,
+        groupCount: metrics.groups.length,
+        yearCount: metrics.years.length
+      });
+
+      return metrics;
+    }
+
+    function renderKPISection(metrics) {
+      document.getElementById("execKpiGross").textContent = compactMoney(metrics.gross);
+      document.getElementById("execKpiCollectible").textContent = compactMoney(metrics.collectible);
+      document.getElementById("execKpiCollectiblePct").textContent = `${(metrics.collectiblePct * 100).toFixed(1)}%`;
+      document.getElementById("execKpiLargestGroupPct").textContent = `${(metrics.largestGroupPct * 100).toFixed(1)}%`;
+    }
+
+    function renderCarrierGroupChart(metrics) {
+      const theme = getExecTheme();
+      const canvas = document.getElementById("execCarrierGroupCanvas");
+      const labels = metrics.groups.map((g) => g.group);
+      const values = metrics.groups.map((g) => g.total);
+      const colors = values.map((_, idx) => (idx < 3 ? theme.barTop : theme.bar));
+
+      if (execCarrierGroupChart) execCarrierGroupChart.destroy();
+      execCarrierGroupChart = new Chart(canvas.getContext("2d"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label: "Total Limits",
+            data: values,
+            backgroundColor: colors,
+            borderColor: colors,
+            borderWidth: 1,
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: (ctx) => `Total: ${money(ctx.parsed.y)}` } }
+          },
+          scales: {
+            x: { ticks: { color: theme.axis, maxRotation: 40 }, grid: { color: theme.grid } },
+            y: { beginAtZero: true, ticks: { color: theme.axis, callback: (v) => compactMoney(v) }, grid: { color: theme.grid } }
+          }
+        }
+      });
+
+      document.getElementById("execConcentrationText").textContent =
+        `Top 3 Groups Control ${(metrics.top3Pct * 100).toFixed(1)}% of Tower`;
+    }
+
+    function renderLimitTypeChart(metrics) {
+      const theme = getExecTheme();
+      const canvas = document.getElementById("execLimitTypeCanvas");
+      const labels = metrics.limitTypes.map((x) => x.type);
+      const values = metrics.limitTypes.map((x) => x.total);
+
+      if (execLimitTypeChart) execLimitTypeChart.destroy();
+      execLimitTypeChart = new Chart(canvas.getContext("2d"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label: "Total Limits",
+            data: values,
+            backgroundColor: theme.barMuted,
+            borderColor: theme.barMuted,
+            borderWidth: 1,
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          indexAxis: "y",
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { beginAtZero: true, ticks: { color: theme.axis, callback: (v) => compactMoney(v) }, grid: { color: theme.grid } },
+            y: { ticks: { color: theme.axis }, grid: { color: "rgba(0,0,0,0)" } }
+          }
+        }
+      });
+    }
+
+    function renderYearTrendChart(metrics) {
+      const theme = getExecTheme();
+      const canvas = document.getElementById("execYearTrendCanvas");
+      const labels = metrics.years.map((y) => String(y.year));
+      const gross = metrics.years.map((y) => y.gross);
+      const collectible = metrics.years.map((y) => y.collectible);
+
+      if (execYearTrendChart) execYearTrendChart.destroy();
+      execYearTrendChart = new Chart(canvas.getContext("2d"), {
+        data: {
+          labels,
+          datasets: [
+            {
+              type: "bar",
+              label: "Gross Limits",
+              data: gross,
+              backgroundColor: theme.bar,
+              borderColor: theme.bar,
+              borderRadius: 4
+            },
+            {
+              type: "line",
+              label: "Collectible Limits",
+              data: collectible,
+              borderColor: theme.line,
+              pointBackgroundColor: theme.line,
+              pointRadius: 2,
+              pointHoverRadius: 4,
+              borderWidth: 2,
+              tension: 0.2
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: { legend: { labels: { color: theme.text } } },
+          scales: {
+            x: { ticks: { color: theme.axis }, grid: { color: theme.grid } },
+            y: { beginAtZero: true, ticks: { color: theme.axis, callback: (v) => compactMoney(v) }, grid: { color: theme.grid } }
+          }
+        }
+      });
+    }
+
+    async function init() {
+      try {
+        const THEME_STORAGE_KEY = "coverageChartTheme";
+        const getPreferredTheme = () => {
+          const stored = localStorage.getItem(THEME_STORAGE_KEY);
+          if (stored === "light" || stored === "dark") return stored;
+          return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        };
+        const applyThemeToPage = (theme) => {
+          document.documentElement.dataset.theme = theme;
+        };
+
+        const initialTheme = getPreferredTheme();
+        applyThemeToPage(initialTheme);
+
+        await renderCoverageChart({
+          canvasId: "coverageCanvas",
+          csvUrl: "/data/OriginalFiles/tblPolicyLimits.csv",
+          initialView: "carrier",
+          barThickness: "flex",
+          categorySpacing: 1.0,
+          tooltipMaxParticipants: 50
+        });
+
+        const viewSelect = document.getElementById("viewSelect");
+        const startYearSelect = document.getElementById("startYearSelect");
+        const endYearSelect = document.getElementById("endYearSelect");
+        const insuranceProgramSelect = document.getElementById("insuranceProgramSelect");
+        const policyLimitTypeSelect = document.getElementById("policyLimitTypeSelect");
+        const themeToggleBtn = document.getElementById("themeToggleBtn");
+        const themeLabel = document.getElementById("themeLabel");
+        const carrierDropdownMenu = document.getElementById("carrierDropdownMenu");
+        const carrierGroupDropdownMenu = document.getElementById("carrierGroupDropdownMenu");
+        const carrierDropdownLabel = document.getElementById("carrierDropdownLabel");
+        const carrierGroupDropdownLabel = document.getElementById("carrierGroupDropdownLabel");
+        const activeFilterSummary = document.getElementById("activeFilterSummary");
+        const zoomMinInput = document.getElementById("zoomMinInput");
+        const zoomMaxInput = document.getElementById("zoomMaxInput");
+        const resetAllBtn = document.getElementById("resetAll");
+        const exportMenu = document.getElementById("exportMenu");
+        const exportBtn = document.getElementById("exportBtn");
+        const exportMenuPanel = document.getElementById("exportMenuPanel");
+        const exportPngBtn = document.getElementById("exportPngBtn");
+        const exportCsvBtn = document.getElementById("exportCsvBtn");
+        const exportPdfBtn = document.getElementById("exportPdfBtn");
+
+        const selectedValuesFromCheckboxMenu = (container) =>
+          Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+
+        const summarizeSelection = (values, singularLabel) => {
+          if (!values.length) return `All ${singularLabel}s`;
+          if (values.length === 1) return values[0];
+          return `${values.length} ${singularLabel}s`;
+        };
+
+        const updateExecutiveDashboard = () => {
+          const metrics = buildExecutiveMetrics(
+            selectedValuesFromCheckboxMenu(carrierDropdownMenu),
+            selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu)
+          );
+          renderKPISection(metrics);
+          renderCarrierGroupChart(metrics);
+          renderLimitTypeChart(metrics);
+          renderYearTrendChart(metrics);
+        };
+
+        const updateFilterSummary = () => {
+          const startYear = startYearSelect.value || "All";
+          const endYear = endYearSelect.value || "All";
+          const yearsText = startYear === "All" && endYear === "All" ? "All years" : `${startYear} to ${endYear}`;
+
+          const carriers = selectedValuesFromCheckboxMenu(carrierDropdownMenu);
+          const carrierGroups = selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu);
+
+          activeFilterSummary.textContent =
+            `Program: ${insuranceProgramSelect.value || "(none)"} | ` +
+            `Policy Limit Type: ${policyLimitTypeSelect.value || "(none)"} | ` +
+            `Years: ${yearsText} | ` +
+            `Carriers: ${summarizeSelection(carriers, "carrier")} | ` +
+            `Carrier Groups: ${summarizeSelection(carrierGroups, "group")}`;
+
+          updateExecutiveDashboard();
+        };
+
+        function buildCheckboxMenu(container, values, inputName) {
+          container.innerHTML = "";
+          for (const value of values) {
+            const row = document.createElement("label");
+            row.className = "multiOption";
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.name = inputName;
+            cb.value = value;
+            const text = document.createElement("span");
+            text.textContent = value;
+            row.appendChild(cb);
+            row.appendChild(text);
+            container.appendChild(row);
+          }
+        }
+
+        function updateDropdownLabel(labelEl, values, allText, singularNoun) {
+          if (!values.length) {
+            labelEl.textContent = allText;
+            return;
+          }
+          if (values.length === 1) {
+            labelEl.textContent = values[0];
+            return;
+          }
+          labelEl.textContent = `${values.length} ${singularNoun}s selected`;
+        }
+
+        function clearCheckboxMenu(container) {
+          for (const cb of container.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
+        }
+
+        function applyEntityFilters(source = "") {
+          let carriers = selectedValuesFromCheckboxMenu(carrierDropdownMenu);
+          let carrierGroups = selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu);
+
+          if (source === "carrier" && carriers.length > 0 && carrierGroups.length > 0) {
+            clearCheckboxMenu(carrierGroupDropdownMenu);
+            carrierGroups = [];
+          } else if (source === "carrierGroup" && carrierGroups.length > 0 && carriers.length > 0) {
+            clearCheckboxMenu(carrierDropdownMenu);
+            carriers = [];
+          } else if (!source && carriers.length > 0 && carrierGroups.length > 0) {
+            clearCheckboxMenu(carrierGroupDropdownMenu);
+            carrierGroups = [];
+          }
+
+          updateDropdownLabel(carrierDropdownLabel, carriers, "All carriers", "carrier");
+          updateDropdownLabel(carrierGroupDropdownLabel, carrierGroups, "All carrier groups", "group");
+          setEntityFilters({ carriers, carrierGroups });
+          updateFilterSummary();
+        }
+
+        const filterOptions = getFilterOptions();
+        buildCheckboxMenu(carrierDropdownMenu, filterOptions.carriers, "carrier_filter");
+        buildCheckboxMenu(carrierGroupDropdownMenu, filterOptions.carrierGroups, "carrier_group_filter");
+
+        const policyLimitTypeValues = filterOptions.policyLimitTypes || [];
+        for (const type of policyLimitTypeValues) {
+          const opt = document.createElement("option");
+          opt.value = type;
+          opt.textContent = type;
+          policyLimitTypeSelect.appendChild(opt);
+        }
+        if (policyLimitTypeValues.length > 0) {
+          const defaultType = policyLimitTypeValues.includes("Personal Injury") ? "Personal Injury" : policyLimitTypeValues[0];
+          policyLimitTypeSelect.value = defaultType;
+          setPolicyLimitTypeFilter(defaultType);
+        }
+
+        const insuranceProgramValues = filterOptions.insurancePrograms || [];
+        for (const program of insuranceProgramValues) {
+          const opt = document.createElement("option");
+          opt.value = program;
+          opt.textContent = program;
+          insuranceProgramSelect.appendChild(opt);
+        }
+        if (insuranceProgramValues.length > 0) {
+          const defaultProgram = insuranceProgramValues.find((v) => String(v).trim().toLowerCase() === "abc company") || insuranceProgramValues[0];
+          insuranceProgramSelect.value = defaultProgram;
+          setInsuranceProgramFilter(defaultProgram);
+        }
+
+        const bounds = getYearBounds();
+        if (bounds.minYear !== null && bounds.maxYear !== null) {
+          for (let year = bounds.minYear; year <= bounds.maxYear; year++) {
+            const a = document.createElement("option");
+            a.value = String(year);
+            a.textContent = String(year);
+            startYearSelect.appendChild(a);
+            const b = document.createElement("option");
+            b.value = String(year);
+            b.textContent = String(year);
+            endYearSelect.appendChild(b);
+          }
+        }
+
+        function applyYearFilters() {
+          const toYear = (v) => {
+            if (v === null || v === undefined || String(v).trim() === "") return null;
+            const n = Number.parseInt(String(v), 10);
+            return Number.isFinite(n) ? n : null;
+          };
+          const start = toYear(startYearSelect.value);
+          const end = toYear(endYearSelect.value);
+          const boundsNow = getYearBounds();
+          const minBound = Number.isFinite(boundsNow.minYear) ? boundsNow.minYear : null;
+          const maxBound = Number.isFinite(boundsNow.maxYear) ? boundsNow.maxYear : null;
+          const effectiveStart = start !== null ? start : minBound;
+          const effectiveEnd = end !== null ? end : maxBound;
+
+          if (effectiveStart === null && effectiveEnd === null) {
+            resetYearRange();
+          } else {
+            setYearRange(effectiveStart, effectiveEnd);
+          }
+          updateFilterSummary();
+        }
+
+        function applyZoomFilters() {
+          setZoomRange(zoomMinInput.value, zoomMaxInput.value);
+          updateFilterSummary();
+        }
+
+        function closeExportMenu() {
+          exportMenuPanel.hidden = true;
+          exportBtn.setAttribute("aria-expanded", "false");
+        }
+
+        function openExportMenu() {
+          exportMenuPanel.hidden = false;
+          exportBtn.setAttribute("aria-expanded", "true");
+        }
+
+        exportBtn.addEventListener("click", () => {
+          if (exportMenuPanel.hidden) openExportMenu();
+          else closeExportMenu();
+        });
+        document.addEventListener("click", (evt) => {
+          if (!exportMenu.contains(evt.target)) closeExportMenu();
+        });
+        exportPngBtn.addEventListener("click", () => { exportChartAsPNG(); closeExportMenu(); });
+        exportCsvBtn.addEventListener("click", () => { exportFilteredCSV(); closeExportMenu(); });
+        exportPdfBtn.addEventListener("click", async () => {
+          try { await exportReportPDF(); } catch (err) { showError(err); } finally { closeExportMenu(); }
+        });
+
+        const syncThemeUI = (theme) => {
+          const isLight = theme === "light";
+          themeToggleBtn.classList.toggle("isLight", isLight);
+          themeToggleBtn.setAttribute("aria-pressed", String(isLight));
+          themeLabel.textContent = isLight ? "Light mode" : "Dark mode";
+          setChartTheme(theme);
+          updateExecutiveDashboard();
+        };
+
+        syncThemeUI(initialTheme);
+        themeToggleBtn.addEventListener("click", () => {
+          const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+          const next = current === "light" ? "dark" : "light";
+          applyThemeToPage(next);
+          localStorage.setItem(THEME_STORAGE_KEY, next);
+          syncThemeUI(next);
+        });
+
+        viewSelect.addEventListener("change", (e) => setView(e.target.value));
+        startYearSelect.addEventListener("change", applyYearFilters);
+        endYearSelect.addEventListener("change", applyYearFilters);
+        insuranceProgramSelect.addEventListener("change", () => {
+          setInsuranceProgramFilter(insuranceProgramSelect.value);
+          updateFilterSummary();
+        });
+        policyLimitTypeSelect.addEventListener("change", () => {
+          setPolicyLimitTypeFilter(policyLimitTypeSelect.value);
+          updateFilterSummary();
+        });
+        zoomMinInput.addEventListener("change", applyZoomFilters);
+        zoomMaxInput.addEventListener("change", applyZoomFilters);
+        carrierDropdownMenu.addEventListener("change", () => applyEntityFilters("carrier"));
+        carrierGroupDropdownMenu.addEventListener("change", () => applyEntityFilters("carrierGroup"));
+
+        resetAllBtn.addEventListener("click", () => {
+          startYearSelect.value = "";
+          endYearSelect.value = "";
+
+          const defaultProgram = Array.from(insuranceProgramSelect.options)
+            .map((o) => o.value)
+            .find((v) => String(v).trim().toLowerCase() === "abc company") || insuranceProgramSelect.options[0]?.value || "";
+          insuranceProgramSelect.value = defaultProgram;
+
+          const defaultType = Array.from(policyLimitTypeSelect.options)
+            .map((o) => o.value)
+            .find((v) => v === "Personal Injury") || policyLimitTypeSelect.options[0]?.value || "";
+          policyLimitTypeSelect.value = defaultType;
+
+          zoomMinInput.value = "";
+          zoomMaxInput.value = "";
+          clearCheckboxMenu(carrierDropdownMenu);
+          clearCheckboxMenu(carrierGroupDropdownMenu);
+          updateDropdownLabel(carrierDropdownLabel, [], "All carriers", "carrier");
+          updateDropdownLabel(carrierGroupDropdownLabel, [], "All carrier groups", "group");
+
+          resetYearRange();
+          resetInsuranceProgramFilter();
+          setInsuranceProgramFilter(defaultProgram);
+          resetPolicyLimitTypeFilter();
+          setPolicyLimitTypeFilter(defaultType);
+          resetZoomRange();
+          resetEntityFilters();
+          updateFilterSummary();
+        });
+
+        updateFilterSummary();
+      } catch (e) {
+        showError(e);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

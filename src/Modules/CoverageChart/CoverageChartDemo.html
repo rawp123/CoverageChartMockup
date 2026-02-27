@@ -10,11 +10,25 @@
 </head>
 <body>
   <div class="page">
+    <nav class="pageNav" aria-label="Dashboard Navigation">
+      <a class="pageNavTab isActive" href="/Modules/CoverageChart/CoverageChartDemo.html" aria-current="page">
+        Coverage Chart
+      </a>
+      <a class="pageNavTab" href="/Modules/CoverageChart/ExecutiveSummary.html">
+        Executive Summary
+      </a>
+    </nav>
+
     <header class="topbar">
       <div class="title">
-        <h1>Coverage Tower</h1>
-        <div class="subtitle">Floating tower (per year) with Carrier / Carrier Group / Availability views</div>
-        <div class="note">Carrier view colors are by Carrier Group (same group shares the same color).</div>
+        <h1>Insurance Program Coverage Tower</h1>
+        <div class="subtitle">Layer Structure, Carrier Participation, and Availability by Policy Year</div>
+        <div class="themeRow">
+          <span id="themeLabel" class="themeLabel">Dark mode</span>
+          <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
+            <span class="themeToggleThumb" aria-hidden="true"></span>
+          </button>
+        </div>
       </div>
 
       <div class="controls">
@@ -33,9 +47,7 @@
           <div class="controlPanel controlPanel--program">
             <div class="controlBlock">
               <label for="insuranceProgramSelect">Insurance Program</label>
-              <select id="insuranceProgramSelect">
-                <option value="">All Programs</option>
-              </select>
+              <select id="insuranceProgramSelect"></select>
             </div>
           </div>
 
@@ -77,10 +89,10 @@
         <div class="filterBar" aria-label="Focus Filters">
           <div class="controlPanel">
             <div class="controlBlock">
-              <label for="carrierDropdown">Carrier (Multi)</label>
+              <label for="carrierDropdown">Carrier</label>
               <details id="carrierDropdown" class="multiDropdown">
                 <summary class="multiDropdownSummary">
-                  <span id="carrierDropdownLabel">All carriers</span>
+                  <span id="carrierDropdownLabel">All Carriers</span>
                 </summary>
                 <div id="carrierDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier filters"></div>
               </details>
@@ -89,13 +101,20 @@
 
           <div class="controlPanel">
             <div class="controlBlock">
-              <label for="carrierGroupDropdown">Carrier Group (Multi)</label>
+              <label for="carrierGroupDropdown">Carrier Group</label>
               <details id="carrierGroupDropdown" class="multiDropdown">
                 <summary class="multiDropdownSummary">
-                  <span id="carrierGroupDropdownLabel">All carrier groups</span>
+                  <span id="carrierGroupDropdownLabel">All Carrier Groups</span>
                 </summary>
                 <div id="carrierGroupDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier group filters"></div>
               </details>
+            </div>
+          </div>
+
+          <div class="controlPanel">
+            <div class="controlBlock">
+              <label for="policyLimitTypeSelect">Policy Limit Type</label>
+              <select id="policyLimitTypeSelect"></select>
             </div>
           </div>
         </div>
@@ -103,13 +122,23 @@
     </header>
 
     <main class="content">
-      <div class="chartWrap">
-        <div class="chartHint">Scroll to pan. Use <kbd>Shift</kbd> + wheel to scroll horizontally. Use <kbd>Ctrl/Cmd</kbd> + wheel to zoom the x-axis.</div>
-        <div class="chartViewport">
-          <div class="chartSurface">
-            <canvas id="coverageCanvas"></canvas>
+        <div class="chartWrap">
+          <div class="chartTopRow">
+            <div class="exportMenu" id="exportMenu">
+              <button id="exportBtn" class="exportBtn" type="button" aria-expanded="false" aria-controls="exportMenuPanel">Export</button>
+              <div id="exportMenuPanel" class="exportMenuPanel" hidden>
+                <button id="exportPngBtn" type="button">Export Chart (PNG)</button>
+                <button id="exportCsvBtn" type="button">Export Data (CSV)</button>
+                <button id="exportPdfBtn" type="button">Export Report (PDF)</button>
+              </div>
+            </div>
           </div>
-        </div>
+          <div id="activeFilterSummary" class="filterSummary"></div>
+          <div class="chartViewport">
+            <div class="chartSurface">
+              <canvas id="coverageCanvas"></canvas>
+            </div>
+          </div>
       </div>
       <pre id="errorBox" class="error" style="display:none;"></pre>
     </main>
@@ -125,6 +154,12 @@
       resetYearRange,
       setInsuranceProgramFilter,
       resetInsuranceProgramFilter,
+      setPolicyLimitTypeFilter,
+      resetPolicyLimitTypeFilter,
+      setChartTheme,
+      exportChartAsPNG,
+      exportFilteredCSV,
+      exportReportPDF,
       setEntityFilters,
       resetEntityFilters,
       setZoomRange,
@@ -144,6 +179,18 @@
 
     async function init() {
       try {
+        const THEME_STORAGE_KEY = "coverageChartTheme";
+        const getPreferredTheme = () => {
+          const stored = localStorage.getItem(THEME_STORAGE_KEY);
+          if (stored === "light" || stored === "dark") return stored;
+          return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        };
+        const applyThemeToPage = (theme) => {
+          document.documentElement.dataset.theme = theme;
+        };
+        const initialTheme = getPreferredTheme();
+        applyThemeToPage(initialTheme);
+
         await renderCoverageChart({
           canvasId: "coverageCanvas",
           csvUrl: "/data/OriginalFiles/tblPolicyLimits.csv",
@@ -159,13 +206,79 @@
         const startYearSelect = document.getElementById("startYearSelect");
         const endYearSelect = document.getElementById("endYearSelect");
         const insuranceProgramSelect = document.getElementById("insuranceProgramSelect");
+        const policyLimitTypeSelect = document.getElementById("policyLimitTypeSelect");
+        const themeToggleBtn = document.getElementById("themeToggleBtn");
+        const themeLabel = document.getElementById("themeLabel");
         const carrierDropdownMenu = document.getElementById("carrierDropdownMenu");
         const carrierGroupDropdownMenu = document.getElementById("carrierGroupDropdownMenu");
         const carrierDropdownLabel = document.getElementById("carrierDropdownLabel");
         const carrierGroupDropdownLabel = document.getElementById("carrierGroupDropdownLabel");
+        const activeFilterSummary = document.getElementById("activeFilterSummary");
         const zoomMinInput = document.getElementById("zoomMinInput");
         const zoomMaxInput = document.getElementById("zoomMaxInput");
         const resetAllBtn = document.getElementById("resetAll");
+        const exportMenu = document.getElementById("exportMenu");
+        const exportBtn = document.getElementById("exportBtn");
+        const exportMenuPanel = document.getElementById("exportMenuPanel");
+        const exportPngBtn = document.getElementById("exportPngBtn");
+        const exportCsvBtn = document.getElementById("exportCsvBtn");
+        const exportPdfBtn = document.getElementById("exportPdfBtn");
+
+        function closeExportMenu() {
+          exportMenuPanel.hidden = true;
+          exportBtn.setAttribute("aria-expanded", "false");
+        }
+
+        function openExportMenu() {
+          exportMenuPanel.hidden = false;
+          exportBtn.setAttribute("aria-expanded", "true");
+        }
+
+        exportBtn.addEventListener("click", () => {
+          if (exportMenuPanel.hidden) openExportMenu();
+          else closeExportMenu();
+        });
+
+        document.addEventListener("click", (evt) => {
+          if (!exportMenu.contains(evt.target)) closeExportMenu();
+        });
+
+        exportPngBtn.addEventListener("click", () => {
+          exportChartAsPNG();
+          closeExportMenu();
+        });
+
+        exportCsvBtn.addEventListener("click", () => {
+          exportFilteredCSV();
+          closeExportMenu();
+        });
+
+        exportPdfBtn.addEventListener("click", async () => {
+          try {
+            await exportReportPDF();
+          } catch (err) {
+            showError(err);
+          } finally {
+            closeExportMenu();
+          }
+        });
+
+        function syncThemeUI(theme) {
+          const isLight = theme === "light";
+          themeToggleBtn.classList.toggle("isLight", isLight);
+          themeToggleBtn.setAttribute("aria-pressed", String(isLight));
+          themeLabel.textContent = isLight ? "Light mode" : "Dark mode";
+          setChartTheme(theme);
+        }
+
+        syncThemeUI(initialTheme);
+        themeToggleBtn.addEventListener("click", () => {
+          const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+          const next = current === "light" ? "dark" : "light";
+          applyThemeToPage(next);
+          localStorage.setItem(THEME_STORAGE_KEY, next);
+          syncThemeUI(next);
+        });
 
         const bounds = getYearBounds();
         if (bounds.minYear !== null && bounds.maxYear !== null) {
@@ -205,11 +318,33 @@
 
         buildCheckboxMenu(carrierDropdownMenu, filterOptions.carriers, "carrier_filter");
         buildCheckboxMenu(carrierGroupDropdownMenu, filterOptions.carrierGroups, "carrier_group_filter");
-        for (const program of filterOptions.insurancePrograms || []) {
+        const policyLimitTypeValues = filterOptions.policyLimitTypes || [];
+        for (const policyLimitType of policyLimitTypeValues) {
+          const opt = document.createElement("option");
+          opt.value = policyLimitType;
+          opt.textContent = policyLimitType;
+          policyLimitTypeSelect.appendChild(opt);
+        }
+        if (policyLimitTypeValues.length > 0) {
+          const defaultPolicyLimitType = policyLimitTypeValues.includes("Personal Injury")
+            ? "Personal Injury"
+            : policyLimitTypeValues[0];
+          policyLimitTypeSelect.value = defaultPolicyLimitType;
+          setPolicyLimitTypeFilter(defaultPolicyLimitType);
+        }
+        const insuranceProgramValues = filterOptions.insurancePrograms || [];
+        for (const program of insuranceProgramValues) {
           const opt = document.createElement("option");
           opt.value = program;
           opt.textContent = program;
           insuranceProgramSelect.appendChild(opt);
+        }
+        if (insuranceProgramValues.length > 0) {
+          const defaultInsuranceProgram = insuranceProgramValues.find(
+            (v) => String(v).trim().toLowerCase() === "abc company"
+          ) || insuranceProgramValues[0];
+          insuranceProgramSelect.value = defaultInsuranceProgram;
+          setInsuranceProgramFilter(defaultInsuranceProgram);
         }
 
         function applyYearFilters() {
@@ -230,21 +365,33 @@
 
           if (effectiveStart === null && effectiveEnd === null) {
             resetYearRange();
+            updateFilterSummary();
             return;
           }
           setYearRange(effectiveStart, effectiveEnd);
+          updateFilterSummary();
         }
 
         function applyZoomFilters() {
           setZoomRange(zoomMinInput.value, zoomMaxInput.value);
+          updateFilterSummary();
         }
 
         function applyInsuranceProgramFilter() {
           setInsuranceProgramFilter(insuranceProgramSelect.value);
+          updateFilterSummary();
         }
 
+        function applyPolicyLimitTypeFilter() {
+          setPolicyLimitTypeFilter(policyLimitTypeSelect.value);
+          updateFilterSummary();
+        }
         function selectedValuesFromCheckboxMenu(container) {
           return Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+        }
+
+        function clearCheckboxMenu(container) {
+          for (const cb of container.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
         }
 
         function updateDropdownLabel(labelEl, values, allText, singularNoun) {
@@ -259,15 +406,54 @@
           labelEl.textContent = `${values.length} ${singularNoun}s selected`;
         }
 
-        function applyEntityFilters() {
-          const carriers = selectedValuesFromCheckboxMenu(carrierDropdownMenu);
-          const carrierGroups = selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu);
+        function applyEntityFilters(source = "") {
+          let carriers = selectedValuesFromCheckboxMenu(carrierDropdownMenu);
+          let carrierGroups = selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu);
+
+          // Mutual exclusivity: user can filter by custom carriers OR carrier groups, not both.
+          if (source === "carrier" && carriers.length > 0 && carrierGroups.length > 0) {
+            clearCheckboxMenu(carrierGroupDropdownMenu);
+            carrierGroups = [];
+          } else if (source === "carrierGroup" && carrierGroups.length > 0 && carriers.length > 0) {
+            clearCheckboxMenu(carrierDropdownMenu);
+            carriers = [];
+          } else if (!source && carriers.length > 0 && carrierGroups.length > 0) {
+            // Fallback if both are somehow set simultaneously.
+            clearCheckboxMenu(carrierGroupDropdownMenu);
+            carrierGroups = [];
+          }
+
           updateDropdownLabel(carrierDropdownLabel, carriers, "All carriers", "carrier");
           updateDropdownLabel(carrierGroupDropdownLabel, carrierGroups, "All carrier groups", "group");
           setEntityFilters({
             carriers,
             carrierGroups
           });
+          updateFilterSummary();
+        }
+
+        function summarizeSelection(values, singularLabel) {
+          if (!values.length) return `All ${singularLabel}s`;
+          if (values.length === 1) return values[0];
+          return `${values.length} ${singularLabel}s`;
+        }
+
+        function updateFilterSummary() {
+          const startYear = startYearSelect.value || "All";
+          const endYear = endYearSelect.value || "All";
+          const yearsText = startYear === "All" && endYear === "All"
+            ? "All years"
+            : `${startYear} to ${endYear}`;
+
+          const carriers = selectedValuesFromCheckboxMenu(carrierDropdownMenu);
+          const carrierGroups = selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu);
+
+          activeFilterSummary.textContent =
+            `Program: ${insuranceProgramSelect.value || "(none)"} | ` +
+            `Policy Limit Type: ${policyLimitTypeSelect.value || "(none)"} | ` +
+            `Years: ${yearsText} | ` +
+            `Carriers: ${summarizeSelection(carriers, "carrier")} | ` +
+            `Carrier Groups: ${summarizeSelection(carrierGroups, "group")}`;
         }
 
         startYearSelect.addEventListener("input", applyYearFilters);
@@ -277,17 +463,18 @@
         endYearSelect.addEventListener("change", applyYearFilters);
         endYearSelect.addEventListener("blur", applyYearFilters);
         insuranceProgramSelect.addEventListener("change", applyInsuranceProgramFilter);
+        policyLimitTypeSelect.addEventListener("change", applyPolicyLimitTypeFilter);
 
         zoomMinInput.addEventListener("change", applyZoomFilters);
         zoomMaxInput.addEventListener("change", applyZoomFilters);
         zoomMinInput.addEventListener("blur", applyZoomFilters);
         zoomMaxInput.addEventListener("blur", applyZoomFilters);
-        carrierDropdownMenu.addEventListener("change", applyEntityFilters);
-        carrierGroupDropdownMenu.addEventListener("change", applyEntityFilters);
+        carrierDropdownMenu.addEventListener("change", () => applyEntityFilters("carrier"));
+        carrierGroupDropdownMenu.addEventListener("change", () => applyEntityFilters("carrierGroup"));
 
         function resetEntityFilterUI() {
-          for (const cb of carrierDropdownMenu.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
-          for (const cb of carrierGroupDropdownMenu.querySelectorAll('input[type="checkbox"]')) cb.checked = false;
+          clearCheckboxMenu(carrierDropdownMenu);
+          clearCheckboxMenu(carrierGroupDropdownMenu);
           updateDropdownLabel(carrierDropdownLabel, [], "All carriers", "carrier");
           updateDropdownLabel(carrierGroupDropdownLabel, [], "All carrier groups", "group");
         }
@@ -295,15 +482,31 @@
         resetAllBtn.addEventListener("click", () => {
           startYearSelect.value = "";
           endYearSelect.value = "";
-          insuranceProgramSelect.value = "";
+          const defaultInsuranceProgram = Array.from(insuranceProgramSelect.options)
+            .map((o) => o.value)
+            .find((v) => String(v).trim().toLowerCase() === "abc company")
+            || insuranceProgramSelect.options[0]?.value
+            || "";
+          insuranceProgramSelect.value = defaultInsuranceProgram;
+          const defaultPolicyLimitType = Array.from(policyLimitTypeSelect.options)
+            .map((o) => o.value)
+            .find((v) => v === "Personal Injury")
+            || policyLimitTypeSelect.options[0]?.value
+            || "";
+          policyLimitTypeSelect.value = defaultPolicyLimitType;
           zoomMinInput.value = "";
           zoomMaxInput.value = "";
           resetEntityFilterUI();
           resetYearRange();
           resetInsuranceProgramFilter();
+          setInsuranceProgramFilter(defaultInsuranceProgram);
           resetZoomRange();
+          resetPolicyLimitTypeFilter();
+          setPolicyLimitTypeFilter(defaultPolicyLimitType);
           resetEntityFilters();
+          updateFilterSummary();
         });
+        updateFilterSummary();
       } catch (e) {
         showError(e);
       }

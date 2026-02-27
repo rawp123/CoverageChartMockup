@@ -32,7 +32,9 @@ let _cache = {
     endYear: null,
     zoomMin: null,
     zoomMax: null,
+    sirMode: "off",
     insuranceProgram: "",
+    policyLimitType: "",
     carriers: [],
     carrierGroups: []
   }
@@ -67,12 +69,103 @@ const yearOf = (v) => {
 
 const money = (v) => `$${Number(v || 0).toLocaleString()}`;
 
+function compactMoney(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "$0";
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  const units = [
+    { value: 1e12, suffix: "T" },
+    { value: 1e9, suffix: "B" },
+    { value: 1e6, suffix: "M" },
+    { value: 1e3, suffix: "K" }
+  ];
+
+  for (const u of units) {
+    if (abs >= u.value) {
+      const scaled = abs / u.value;
+      const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+      const text = Number(scaled.toFixed(digits)).toString();
+      return `$${sign}${text}${u.suffix}`;
+    }
+  }
+
+  return `$${sign}${Math.round(abs).toLocaleString()}`;
+}
+
 const normKey = (k) =>
   String(k ?? "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+const legendTitleForView = (view) => {
+  if (view === "carrierGroup") return "Carrier Group";
+  if (view === "carrier") return "Carrier";
+  if (view === "availability") return "Availability";
+  return "Legend";
+};
+const summarizeFilterSelection = (items, singular, pluralAll) => {
+  const list = normalizeStringList(items);
+  if (!list.length) return pluralAll;
+  if (list.length === 1) return list[0];
+  return `${list.length} ${singular}s`;
+};
+function getLegendFilterLines() {
+  const f = _cache?.filters || {};
+  const yearsText =
+    Number.isFinite(f.startYear) || Number.isFinite(f.endYear)
+      ? `${Number.isFinite(f.startYear) ? f.startYear : "All"} to ${Number.isFinite(f.endYear) ? f.endYear : "All"}`
+      : "All years";
+  const zoomText =
+    Number.isFinite(f.zoomMin) || Number.isFinite(f.zoomMax)
+      ? `${Number.isFinite(f.zoomMin) ? compactMoney(f.zoomMin) : "Auto"} to ${Number.isFinite(f.zoomMax) ? compactMoney(f.zoomMax) : "Auto"}`
+      : "Auto";
+  return [
+    `Program: ${String(f.insuranceProgram || "(none)")}`,
+    `Policy Limit Type: ${String(f.policyLimitType || "(none)")}`,
+    `Years: ${yearsText}`,
+    `Carriers: ${summarizeFilterSelection(f.carriers, "carrier", "All carriers")}`,
+    `Carrier Groups: ${summarizeFilterSelection(f.carrierGroups, "group", "All groups")}`,
+    `Zoom: ${zoomText}`
+  ];
+}
+
+function roundedRectPath(ctx, x, y, w, h, r) {
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
+
+const getThemeName = () =>
+  document?.documentElement?.dataset?.theme === "light" ? "light" : "dark";
+
+const getChartThemeColors = (themeName = getThemeName()) => {
+  if (themeName === "light") {
+    return {
+      outline: "rgba(30, 41, 59, 0.32)",
+      legendText: "rgba(15, 23, 42, 0.92)",
+      xGrid: "rgba(15, 23, 42, 0.12)",
+      yGrid: "rgba(15, 23, 42, 0.14)",
+      axisTicks: "rgba(15, 23, 42, 0.92)",
+      yTitle: "rgba(15, 23, 42, 0.95)"
+    };
+  }
+
+  return {
+    outline: "rgba(15,23,42,0.42)",
+    legendText: "rgba(255,255,255,0.95)",
+    xGrid: "rgba(255,255,255,0.06)",
+    yGrid: "rgba(255,255,255,0.08)",
+    axisTicks: "rgba(255,255,255,0.92)",
+    yTitle: "rgba(255,255,255,0.95)"
+  };
+};
 
 const getBy = (obj, ...candidates) => {
   if (!obj) return "";
@@ -185,6 +278,97 @@ const quotaShareGuidesPlugin = {
       });
     });
 
+    ctx.restore();
+  }
+};
+
+const legendTitleBadgePlugin = {
+  id: "legendTitleBadge",
+  afterDraw(chartInstance) {
+    const legend = chartInstance?.legend;
+    const titleOpts = chartInstance?.options?.plugins?.legend?.title;
+    const text = String(titleOpts?.text || "").trim();
+    if (!legend || !titleOpts?.display || !text) return;
+
+    const ctx = chartInstance.ctx;
+    const theme = getThemeName();
+    const fill = theme === "light" ? "rgba(30, 64, 175, 0.12)" : "rgba(96, 165, 250, 0.17)";
+    const stroke = theme === "light" ? "rgba(30, 64, 175, 0.45)" : "rgba(147, 197, 253, 0.45)";
+    const textColor = theme === "light" ? "rgba(15, 23, 42, 0.95)" : "rgba(255,255,255,0.96)";
+
+    const fontSize = 12;
+    const fontWeight = "600";
+    const fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    const hPad = 10;
+    const vPad = 4;
+    const radius = 8;
+
+    ctx.save();
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    const textWidth = Math.ceil(ctx.measureText(text).width);
+    const badgeW = textWidth + hPad * 2;
+    const badgeH = fontSize + vPad * 2;
+    const x = Math.round(legend.left + (legend.width - badgeW) / 2);
+    const y = Math.round(legend.top + 3);
+
+    roundedRectPath(ctx, x, y, badgeW, badgeH, radius);
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = textColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x + badgeW / 2, y + badgeH / 2 + 0.5);
+    ctx.restore();
+  }
+};
+
+const legendFiltersPanelPlugin = {
+  id: "legendFiltersPanel",
+  afterDraw(chartInstance) {
+    const legend = chartInstance?.legend;
+    if (!legend || legend.options?.display === false) return;
+    const lines = getLegendFilterLines();
+    if (!lines.length) return;
+
+    const ctx = chartInstance.ctx;
+    const theme = getThemeName();
+    const boxFill = theme === "light" ? "rgba(239, 246, 255, 0.97)" : "rgba(10, 25, 47, 0.97)";
+    const boxStroke = theme === "light" ? "rgba(30, 64, 175, 0.30)" : "rgba(148, 163, 184, 0.30)";
+    const textColor = theme === "light" ? "rgba(15, 23, 42, 0.95)" : "rgba(241, 245, 249, 0.95)";
+
+    const fontSize = 10.5;
+    const lineHeight = 14;
+    const hPad = 8;
+    const vPad = 7;
+    const radius = 10;
+
+    ctx.save();
+    ctx.font = `500 ${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    const contentW = Math.ceil(Math.max(...lines.map((l) => ctx.measureText(l).width)));
+    const panelW = Math.max(legend.width - 4, contentW + hPad * 2);
+    const panelH = lines.length * lineHeight + vPad * 2;
+    const x = Math.round(legend.left + 2);
+    const y = Math.round(Math.min(
+      chartInstance.height - panelH - 8,
+      legend.top + legend.height + 10
+    ));
+
+    roundedRectPath(ctx, x, y, panelW, panelH, radius);
+    ctx.fillStyle = boxFill;
+    ctx.strokeStyle = boxStroke;
+    ctx.lineWidth = 1;
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = textColor;
+    ctx.textBaseline = "top";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], x + hPad, y + vPad + i * lineHeight);
+    }
     ctx.restore();
   }
 };
@@ -328,6 +512,7 @@ function buildSlices({
   carrierRows,
   carrierGroupRows,
   insuranceProgramRows,
+  policyLimitTypeRows,
   useYearAxis
 }) {
   const policyDateMap = {};
@@ -375,6 +560,26 @@ function buildSlices({
     if (nm) insuranceProgramNameById[id] = nm;
   }
 
+  const policyLimitTypeNameById = {};
+  for (const r of policyLimitTypeRows || []) {
+    const id = String(
+      getBy(r, "PolicyLimitTypeID", "Policy Limit Type ID", "Policy Limit ID", "ID", "Policy ID")
+    ).trim();
+    if (!id) continue;
+    const nm = String(
+      getBy(
+        r,
+        "PolicyLimitTypeName",
+        "PolicyLimitType",
+        "Policy Limit Type",
+        "Policy Limity Type",
+        "Type",
+        "Name"
+      )
+    ).trim();
+    if (nm) policyLimitTypeNameById[id] = nm;
+  }
+
   const policyInfoById = {};
   for (const r of policyRows) {
     const pid = String(getBy(r, "PolicyID", "Policy Id", "ID")).trim();
@@ -399,14 +604,19 @@ function buildSlices({
         }
 
         const policyNo = String(
-          getBy(r, "policy_no", "PolicyNo", "Policy Number", "PolicyNumber")
+          getBy(r, "policy_no", "PolicyNo", "Policy Number", "PolicyNumber", "PolicyNum")
         ).trim();
         const insuranceProgramId = String(
           getBy(r, "InsuranceProgramID", "Insurance Program ID")
         ).trim();
+        const namedInsuredId = String(
+          getBy(r, "NamedInsuredID", "Named Insured ID")
+        ).trim();
         const insuranceProgram =
           String(getBy(r, "InsuranceProgram", "Program", "ProgramName")).trim() ||
           (insuranceProgramId ? insuranceProgramNameById[insuranceProgramId] || "" : "");
+        const sirPerOcc = num(getBy(r, "SIRPerOcc", "SIR Per Occ", "SIR"));
+        const sirAggregate = num(getBy(r, "SIRAggregate", "SIR Aggregate"));
 
         const cRow = carrierId ? carrierRowById[carrierId] : null;
         const availability = classifyAvailability(r, cRow);
@@ -415,7 +625,11 @@ function buildSlices({
           policy_no: policyNo,
           carrier: carrierName || "(unknown carrier)",
           carrierGroup: carrierGroupName || "(unknown group)",
+          insuranceProgramId,
           insuranceProgram: insuranceProgram || "(unknown program)",
+          namedInsuredId,
+          sirPerOcc,
+          sirAggregate,
           availability,
         };
   }
@@ -446,11 +660,20 @@ function buildSlices({
 
     const attach = Math.round(attachRaw);
     const sliceLimit = Math.round(sliceLimitRaw);
+    const policyLimitTypeId = String(
+      getBy(r, "PolicyLimitTypeID", "Policy Limit Type ID", "Policy Limit ID")
+    ).trim();
+    const policyLimitType = policyLimitTypeNameById[policyLimitTypeId] || policyLimitTypeId;
 
     const info = policyInfoById[pid] || {
       policy_no: "",
       carrier: "(unknown carrier)",
       carrierGroup: "(unknown group)",
+      insuranceProgramId: "",
+      insuranceProgram: "(unknown program)",
+      namedInsuredId: "",
+      sirPerOcc: 0,
+      sirAggregate: 0,
       availability: "Available"
     };
 
@@ -463,7 +686,13 @@ function buildSlices({
       policy_no: info.policy_no,
       carrier: info.carrier,
       carrierGroup: info.carrierGroup,
+      insuranceProgramId: info.insuranceProgramId,
       insuranceProgram: info.insuranceProgram,
+      namedInsuredId: info.namedInsuredId,
+      sirPerOcc: Number(info.sirPerOcc || 0),
+      sirAggregate: Number(info.sirAggregate || 0),
+      policyLimitTypeId,
+      policyLimitType,
       availability: info.availability
     });
   }
@@ -482,15 +711,25 @@ function buildSlices({
    Quota-share detection
 ================================ */
 
+function quotaGroupKey(s) {
+  // Quota-share is scoped within the same program/year/layer/type (+ named insured).
+  const program = String(s?.insuranceProgramId || s?.insuranceProgram || "").trim();
+  const year = Number.isFinite(s?.year) ? String(s.year) : String(s?.x || "").trim();
+  const attach = String(s?.attach ?? "").trim();
+  const limitType = String(s?.policyLimitTypeId || "").trim();
+  const namedInsured = String(s?.namedInsuredId || "").trim();
+  return `${program}||${year}||${attach}||${limitType}||${namedInsured}`;
+}
+
 function buildQuotaKeySet(slices) {
-  const byXA = new Map(); // `${x}||${attach}` -> Set(PolicyID)
+  const byQuotaKey = new Map(); // quotaGroupKey -> Set(PolicyID)
   for (const s of slices) {
-    const k = `${s.x}||${s.attach}`;
-    if (!byXA.has(k)) byXA.set(k, new Set());
-    byXA.get(k).add(String(s.PolicyID));
+    const k = quotaGroupKey(s);
+    if (!byQuotaKey.has(k)) byQuotaKey.set(k, new Set());
+    byQuotaKey.get(k).add(String(s.PolicyID));
   }
   const quotaKeySet = new Set();
-  for (const [k, set] of byXA.entries()) {
+  for (const [k, set] of byQuotaKey.entries()) {
     if (set.size > 1) quotaKeySet.add(k);
   }
   return quotaKeySet;
@@ -501,6 +740,7 @@ function applyFiltersToCache() {
   const startYear = Number.isFinite(filters.startYear) ? filters.startYear : null;
   const endYear = Number.isFinite(filters.endYear) ? filters.endYear : null;
   const selectedProgram = String(filters.insuranceProgram || "").trim();
+  const selectedPolicyLimitType = String(filters.policyLimitType || "").trim();
 
   let filteredSlices = allSlices.slice();
   if (useYearAxis && (startYear !== null || endYear !== null)) {
@@ -515,6 +755,12 @@ function applyFiltersToCache() {
   if (selectedProgram) {
     filteredSlices = filteredSlices.filter(
       (s) => String(s?.insuranceProgram || "").trim() === selectedProgram
+    );
+  }
+
+  if (selectedPolicyLimitType) {
+    filteredSlices = filteredSlices.filter(
+      (s) => String(s?.policyLimitType || "").trim() === selectedPolicyLimitType
     );
   }
 
@@ -553,6 +799,7 @@ function sliceMatchesSelection(slice, selection) {
     selection.carrierGroups.size === 0 || selection.carrierGroups.has(String(slice?.carrierGroup || ""));
   return carrierOk && groupOk;
 }
+
 
 function getChartSurfaceWidthPx() {
   const viewport = _cache.dom?.viewport;
@@ -627,7 +874,7 @@ function rebuildChart() {
   const { barThickness, categorySpacing } = _cache.options;
 
   chart.data.labels = _cache.xLabels;
-  chart.data.datasets = buildDatasetsForView({
+  const barDatasets = buildDatasetsForView({
     slices: _cache.slices,
     xLabels: _cache.xLabels,
     view: currentView,
@@ -635,15 +882,44 @@ function rebuildChart() {
     categorySpacing,
     quotaKeySet: _cache.quotaKeySet
   });
+  const sirDataset = buildSirDataset({
+    slices: _cache.slices,
+    xLabels: _cache.xLabels,
+    sirMode: _cache.filters?.sirMode
+  });
+  chart.data.datasets = sirDataset ? [...barDatasets, sirDataset] : barDatasets;
 
   const y = chart.options?.scales?.y;
   if (y) {
     y.min = Number.isFinite(_cache.filters.zoomMin) ? _cache.filters.zoomMin : undefined;
     y.max = Number.isFinite(_cache.filters.zoomMax) ? _cache.filters.zoomMax : undefined;
   }
+  if (chart.options?.plugins?.legend?.title) {
+    chart.options.plugins.legend.title.text = legendTitleForView(currentView);
+  }
 
   chart.update();
   syncChartViewportWidth();
+}
+
+function applyChartTheme(themeName = getThemeName()) {
+  if (!chart) return;
+  const c = getChartThemeColors(themeName);
+  chart.options.plugins.outlineBars.color = c.outline;
+  chart.options.plugins.legend.labels.color = c.legendText;
+  chart.options.scales.x.grid.color = c.xGrid;
+  chart.options.scales.x.ticks.color = c.axisTicks;
+  chart.options.scales.y.grid.color = c.yGrid;
+  chart.options.scales.y.ticks.color = c.axisTicks;
+  chart.options.scales.y.title.color = c.yTitle;
+  const sirDs = chart.data.datasets?.find((ds) => ds?.datasetId === "sirOverlay");
+  if (sirDs) {
+    const sirColor = _cache.filters?.sirMode === "aggregate" ? "#f97316" : "#facc15";
+    sirDs.borderColor = sirColor;
+    sirDs.pointBackgroundColor = sirColor;
+    sirDs.pointBorderColor = sirColor;
+  }
+  chart.update();
 }
 
 /* ================================
@@ -651,7 +927,7 @@ function rebuildChart() {
 ================================ */
 
 function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpacing, quotaKeySet }) {
-  const qaKey = (s) => `${s.x}||${s.attach}`;
+  const qaKey = (s) => quotaGroupKey(s);
   const isQuotaSlice = (s) => quotaKeySet && quotaKeySet.has(qaKey(s));
   const isUnavailable = (s) => String(s?.availability || "").toLowerCase().includes("unavail");
   const selection = getSelectionSets();
@@ -677,19 +953,23 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
     }
   }
 
-  const layerMap = new Map(); // `${group}||${x}||${attach}`
+  const layerMap = new Map(); // Non-quota: one layer per policy. Quota-share: grouped by quota key.
   const groups = new Set();
 
   for (const s of slices) {
     const group = keyOf(s);
     groups.add(group);
 
-    const k = `${group}||${s.x}||${s.attach}`;
+    const sliceQuotaKey = qaKey(s);
+    const k = group === "Quota share"
+      ? `${group}||${s.x}||${s.attach}||${sliceQuotaKey}`
+      : `${group}||${s.x}||${s.attach}||${String(s.PolicyID)}`;
     if (!layerMap.has(k)) {
       layerMap.set(k, {
         group,
         x: s.x,
         attach: s.attach,
+        quotaGroupKey: group === "Quota share" ? sliceQuotaKey : "",
         sumLimit: 0,
         participants: [],
         hasSelectionMatch: false
@@ -705,7 +985,10 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
       carrierGroup: s.carrierGroup,
       availability: s.availability,
       policy_no: s.policy_no,
-      sliceLimit: s.sliceLimit
+      sliceLimit: s.sliceLimit,
+      sirPerOcc: Number(s.sirPerOcc || 0),
+      sirAggregate: Number(s.sirAggregate || 0),
+      quotaGroupKey: sliceQuotaKey
     });
   }
 
@@ -755,7 +1038,7 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
         return String(a.carrier || "").localeCompare(String(b.carrier || ""));
       });
 
-      const isQuotaShare = quotaKeySet && quotaKeySet.has(`${e.x}||${e.attach}`);
+      const isQuotaShare = !!(e.quotaGroupKey && quotaKeySet && quotaKeySet.has(e.quotaGroupKey));
 
       points.push({
         x: e.x,
@@ -766,6 +1049,7 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
         participants: e.participants,
         group,
         isQuotaShare,
+        quotaGroupKey: e.quotaGroupKey || "",
         isHighlighted: !selection.active || !!e.hasSelectionMatch
       });
     }
@@ -821,6 +1105,382 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   });
 }
 
+function getSirValueFromSlice(slice, sirMode) {
+  if (sirMode === "aggregate") return Number(slice?.sirAggregate || 0);
+  if (sirMode === "perOcc") return Number(slice?.sirPerOcc || 0);
+  return 0;
+}
+
+function buildSirDataset({ slices, xLabels, sirMode }) {
+  if (!sirMode || sirMode === "off") return null;
+  const mode = sirMode === "aggregate" ? "aggregate" : "perOcc";
+  const byX = new Map();
+  for (const s of slices || []) {
+    const x = String(s?.x ?? "");
+    if (!x) continue;
+    const v = getSirValueFromSlice(s, mode);
+    if (!Number.isFinite(v) || v <= 0) continue;
+    byX.set(x, Math.max(byX.get(x) || 0, v));
+  }
+
+  const color = mode === "aggregate" ? "#f97316" : "#facc15";
+  const data = (xLabels || []).map((x) => {
+    const v = byX.get(String(x));
+    return { x: String(x), y: Number.isFinite(v) ? v : null };
+  });
+
+  return {
+    datasetId: "sirOverlay",
+    type: "line",
+    label: mode === "aggregate" ? "SIR (Aggregate)" : "SIR (Per Occ)",
+    data,
+    parsing: { xAxisKey: "x", yAxisKey: "y" },
+    spanGaps: true,
+    borderColor: color,
+    pointBackgroundColor: color,
+    pointBorderColor: color,
+    borderWidth: 2,
+    pointRadius: 2,
+    pointHoverRadius: 4,
+    tension: 0.2,
+    fill: false,
+    yAxisID: "y",
+    order: 1000
+  };
+}
+
+/* ================================
+   Export helpers
+================================ */
+
+function toDateStamp(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
+}
+
+function csvCell(v) {
+  const s = String(v ?? "");
+  if (!/[",\n]/.test(s)) return s;
+  return `"${s.replace(/"/g, "\"\"")}"`;
+}
+
+function triggerDownload(href, filename) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function triggerBlobDownload(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  triggerDownload(url, filename);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function loadScriptOnce(src, isReady) {
+  if (isReady()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = Array.from(document.querySelectorAll("script")).find((s) => s.src === src);
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error(`Failed to load script: ${src}`)), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function ensurePdfLibs() {
+  await loadScriptOnce(
+    "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",
+    () => typeof window.html2canvas === "function"
+  );
+  await loadScriptOnce(
+    "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
+    () => !!window.jspdf?.jsPDF
+  );
+}
+
+function getFilterMeta() {
+  const f = _cache.filters || {};
+  const yearRange =
+    Number.isFinite(f.startYear) || Number.isFinite(f.endYear)
+      ? `${Number.isFinite(f.startYear) ? f.startYear : "All"}-${Number.isFinite(f.endYear) ? f.endYear : "All"}`
+      : "All";
+  const carriers = normalizeStringList(f.carriers);
+  const carrierGroups = normalizeStringList(f.carrierGroups);
+  const viewLabel = currentView === "carrierGroup"
+    ? "Carrier Group"
+    : currentView === "availability"
+      ? "Availability"
+      : "Carrier";
+
+  return {
+    viewLabel,
+    view: currentView,
+    insuranceProgram: String(f.insuranceProgram || "").trim() || "All",
+    policyLimitType: String(f.policyLimitType || "").trim() || "All",
+    yearRange,
+    carriers: carriers.length ? carriers.join(", ") : "All",
+    carrierGroups: carrierGroups.length ? carrierGroups.join(", ") : "All"
+  };
+}
+
+function getExportFilterLines(meta = getFilterMeta()) {
+  return [
+    `View: ${meta.viewLabel} | Insurance Program: ${meta.insuranceProgram} | Policy Limit Type: ${meta.policyLimitType}`,
+    `Year Range: ${meta.yearRange} | Carriers: ${meta.carriers} | Carrier Groups: ${meta.carrierGroups}`
+  ];
+}
+
+function getFilteredSliceRows() {
+  return (_cache.slices || []).map((s) => ({
+    Year: Number.isFinite(s.year) ? s.year : s.x,
+    InsuranceProgram: s.insuranceProgram || "",
+    PolicyLimitType: s.policyLimitType || s.policyLimitTypeId || "",
+    Carrier: s.carrier || "",
+    CarrierGroup: s.carrierGroup || "",
+    Availability: s.availability || "",
+    Attachment: Number(s.attach || 0),
+    LayerLimit: Number(s.sliceLimit || 0),
+    PolicyNumber: s.policy_no || "",
+    PolicyID: s.PolicyID || ""
+  }));
+}
+
+function getAggregatedReportRows() {
+  if (!chart?.data?.datasets) return [];
+  const rows = [];
+  for (const ds of chart.data.datasets) {
+    if (ds?.datasetId === "sirOverlay" || ds?.type === "line") continue;
+    const group = String(ds?.label || "");
+    for (const p of ds?.data || []) {
+      const limit = Number(p?.sumLimit ?? (Number(p?.top || 0) - Number(p?.attach || 0)));
+      const participants = Array.isArray(p?.participants) ? p.participants.length : 0;
+      rows.push({
+        Year: p?.x ?? "",
+        Group: group,
+        Attachment: Number(p?.attach || 0),
+        TotalLimit: Number.isFinite(limit) ? limit : 0,
+        Participants: participants
+      });
+    }
+  }
+
+  rows.sort((a, b) => {
+    const ay = Number(a.Year);
+    const by = Number(b.Year);
+    if (Number.isFinite(ay) && Number.isFinite(by) && ay !== by) return ay - by;
+    const yCmp = String(a.Year).localeCompare(String(b.Year));
+    if (yCmp !== 0) return yCmp;
+    if (a.Attachment !== b.Attachment) return a.Attachment - b.Attachment;
+    return String(a.Group).localeCompare(String(b.Group));
+  });
+  return rows;
+}
+
+/**
+ * Export chart canvas as PNG using the current filtered/rendered state.
+ */
+export function exportChartAsPNG() {
+  if (!chart) throw new Error("Chart is not initialized");
+  const meta = getFilterMeta();
+  const stamp = toDateStamp();
+  const file = `CoverageTower_${stamp}_${currentView}.png`;
+  const srcCanvas = chart.canvas;
+  const theme = getThemeName();
+  const bg = theme === "light" ? "#ffffff" : "#0f1720";
+  const fg = theme === "light" ? "#0f172a" : "#f8fafc";
+  const subFg = theme === "light" ? "rgba(15,23,42,0.88)" : "rgba(248,250,252,0.9)";
+
+  const width = srcCanvas.width;
+  const scale = Math.max(0.85, Math.min(1.6, width / 1200));
+  const titleSize = Math.round(26 * scale);
+  const textSize = Math.round(14 * scale);
+  const sidePad = Math.round(24 * scale);
+  const topPad = Math.round(20 * scale);
+  const lineGap = Math.round(8 * scale);
+  const metaLines = getExportFilterLines(meta);
+  const headerHeight = Math.round(topPad + titleSize + 2 * (textSize + lineGap) + 20 * scale);
+  const outCanvas = document.createElement("canvas");
+  outCanvas.width = width;
+  outCanvas.height = headerHeight + srcCanvas.height;
+  const ctx = outCanvas.getContext("2d");
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+  ctx.drawImage(srcCanvas, 0, headerHeight);
+
+  let y = topPad + titleSize;
+  ctx.fillStyle = fg;
+  ctx.font = `700 ${titleSize}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText("Insurance Program Coverage Tower", sidePad, y);
+
+  ctx.fillStyle = subFg;
+  ctx.font = `500 ${textSize}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+  y += lineGap + textSize;
+  ctx.fillText(metaLines[0], sidePad, y);
+  y += lineGap + textSize;
+  ctx.fillText(metaLines[1], sidePad, y);
+
+  const dataUrl = outCanvas.toDataURL("image/png", 1);
+  triggerDownload(dataUrl, file);
+  console.log(`[Export] PNG saved: ${file}`);
+}
+
+/**
+ * Export currently filtered slices as CSV rows.
+ */
+export function exportFilteredCSV() {
+  const rows = getFilteredSliceRows();
+  const cols = [
+    "Year",
+    "InsuranceProgram",
+    "PolicyLimitType",
+    "Carrier",
+    "CarrierGroup",
+    "Availability",
+    "Attachment",
+    "LayerLimit",
+    "PolicyNumber",
+    "PolicyID"
+  ];
+  const lines = [cols.join(",")];
+  for (const r of rows) lines.push(cols.map((c) => csvCell(r[c])).join(","));
+  const file = `CoverageTower_FilteredData_${toDateStamp()}.csv`;
+  triggerBlobDownload(lines.join("\n"), file, "text/csv;charset=utf-8");
+  console.log(`[Export] CSV saved: ${file} (rows=${rows.length})`);
+}
+
+/**
+ * Export a 2-page PDF report:
+ * page 1 = metadata + chart image
+ * page 2+ = aggregated layer table
+ */
+export async function exportReportPDF() {
+  if (!chart || !_cache.dom?.canvas) throw new Error("Chart is not initialized");
+  await ensurePdfLibs();
+
+  const html2canvas = window.html2canvas;
+  const jsPDF = window.jspdf.jsPDF;
+
+  const meta = getFilterMeta();
+  const stamp = toDateStamp();
+  const filename = `CoverageTower_Report_${stamp}.pdf`;
+
+  const renderCanvas = await html2canvas(_cache.dom.canvas, {
+    scale: 2,
+    backgroundColor: getThemeName() === "light" ? "#ffffff" : "#0f1720",
+    useCORS: true
+  });
+  const chartImg = renderCanvas.toDataURL("image/png");
+
+  const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const margin = 36;
+
+  // Page 1: summary + image
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(18);
+  pdf.text("Insurance Program Coverage Tower", margin, 42);
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(10);
+  const subtitle = getExportFilterLines(meta).join("    ");
+  const subtitleLines = pdf.splitTextToSize(subtitle, pageW - margin * 2);
+  pdf.text(subtitleLines, margin, 62);
+
+  const generated = `Generated: ${new Date().toLocaleString()}`;
+  pdf.text(generated, margin, 78 + (subtitleLines.length - 1) * 12);
+
+  const imgTop = 98 + (subtitleLines.length - 1) * 12;
+  const imgMaxW = pageW - margin * 2;
+  const imgMaxH = pageH - imgTop - 50;
+  const imgRatio = renderCanvas.width / renderCanvas.height || 1;
+  let imgW = imgMaxW;
+  let imgH = imgW / imgRatio;
+  if (imgH > imgMaxH) {
+    imgH = imgMaxH;
+    imgW = imgH * imgRatio;
+  }
+  pdf.addImage(chartImg, "PNG", margin, imgTop, imgW, imgH, undefined, "FAST");
+
+  pdf.setFontSize(9);
+  pdf.text("Generated by Coverage Dashboard", margin, pageH - 18);
+
+  // Page 2: table summary
+  const rows = getAggregatedReportRows();
+  pdf.addPage("a4", "landscape");
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(14);
+  pdf.text("Aggregated Layer Summary", margin, 38);
+
+  const headers = ["Year", "Group", "Attachment", "Total Limit", "Number of Participants"];
+  const widths = [70, 300, 110, 110, 130];
+  const rowH = 16;
+  let y = 58;
+
+  const drawHeader = () => {
+    let x = margin;
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(9);
+    for (let i = 0; i < headers.length; i++) {
+      pdf.text(headers[i], x + 2, y);
+      x += widths[i];
+    }
+    pdf.setLineWidth(0.5);
+    pdf.line(margin, y + 3, margin + widths.reduce((a, b) => a + b, 0), y + 3);
+    y += rowH;
+  };
+
+  drawHeader();
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(8.5);
+
+  for (const r of rows) {
+    if (y > pageH - 30) {
+      pdf.addPage("a4", "landscape");
+      y = 34;
+      drawHeader();
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8.5);
+    }
+
+    const cells = [
+      String(r.Year),
+      String(r.Group),
+      money(r.Attachment),
+      money(r.TotalLimit),
+      String(r.Participants)
+    ];
+
+    let x = margin;
+    for (let i = 0; i < cells.length; i++) {
+      const clipped = pdf.splitTextToSize(cells[i], widths[i] - 4)[0] || "";
+      pdf.text(clipped, x + 2, y);
+      x += widths[i];
+    }
+    y += rowH;
+  }
+
+  pdf.save(filename);
+  console.log(`[Export] PDF saved: ${filename} (tableRows=${rows.length})`);
+}
+
 /* ================================
    Public API
 ================================ */
@@ -837,6 +1497,17 @@ export function setView(view) {
 
 export function getView() {
   return currentView;
+}
+
+export function setChartTheme(themeName) {
+  const theme = themeName === "light" ? "light" : "dark";
+  applyChartTheme(theme);
+}
+
+export function setSIRMode(mode) {
+  const m = String(mode || "").trim();
+  _cache.filters.sirMode = ["off", "perOcc", "aggregate"].includes(m) ? m : "off";
+  rebuildChart();
 }
 
 export function getYearBounds() {
@@ -857,23 +1528,32 @@ export function getFilterOptions() {
   const carrierSet = new Set();
   const carrierGroupSet = new Set();
   const insuranceProgramSet = new Set();
+  const policyLimitTypeSet = new Set();
   for (const s of _cache.allSlices || []) {
     const c = String(s?.carrier || "").trim();
     const g = String(s?.carrierGroup || "").trim();
     const p = String(s?.insuranceProgram || "").trim();
+    const limitType = String(s?.policyLimitType || "").trim();
     if (c && c !== "(unknown carrier)") carrierSet.add(c);
     if (g && g !== "(unknown group)") carrierGroupSet.add(g);
     if (p && p !== "(unknown program)") insuranceProgramSet.add(p);
+    if (limitType) policyLimitTypeSet.add(limitType);
   }
 
   return {
     insurancePrograms: Array.from(insuranceProgramSet).sort((a, b) => a.localeCompare(b)),
+    policyLimitTypes: Array.from(policyLimitTypeSet).sort((a, b) => a.localeCompare(b)),
     carriers: Array.from(carrierSet).sort((a, b) => a.localeCompare(b)),
     carrierGroups: Array.from(carrierGroupSet).sort((a, b) => a.localeCompare(b)),
     selectedInsuranceProgram: String(_cache.filters?.insuranceProgram || "").trim(),
+    selectedPolicyLimitType: String(_cache.filters?.policyLimitType || "").trim(),
     selectedCarriers: normalizeStringList(_cache.filters?.carriers),
     selectedCarrierGroups: normalizeStringList(_cache.filters?.carrierGroups)
   };
+}
+
+export function getFilteredSlices() {
+  return Array.isArray(_cache.slices) ? _cache.slices.slice() : [];
 }
 
 export function setInsuranceProgramFilter(insuranceProgram) {
@@ -884,6 +1564,18 @@ export function setInsuranceProgramFilter(insuranceProgram) {
 
 export function resetInsuranceProgramFilter() {
   _cache.filters.insuranceProgram = "";
+  applyFiltersToCache();
+  rebuildChart();
+}
+
+export function setPolicyLimitTypeFilter(policyLimitType) {
+  _cache.filters.policyLimitType = String(policyLimitType || "").trim();
+  applyFiltersToCache();
+  rebuildChart();
+}
+
+export function resetPolicyLimitTypeFilter() {
+  _cache.filters.policyLimitType = "";
   applyFiltersToCache();
   rebuildChart();
 }
@@ -962,6 +1654,7 @@ export async function renderCoverageChart({
   carrierUrl = "/data/OriginalFiles/tblCarrier.csv",
   carrierGroupUrl = "/data/OriginalFiles/tblCarrierGroup.csv",
   insuranceProgramUrl = "/data/OriginalFiles/tblInsuranceProgram.csv",
+  policyLimitTypeUrl = "/data/OriginalFiles/tblPolicyLimitType.csv",
 
   useYearAxis = true,
 
@@ -980,15 +1673,17 @@ export async function renderCoverageChart({
   currentView = ["carrier", "carrierGroup", "availability"].includes(initialView)
     ? initialView
     : "carrier";
+  const themeColors = getChartThemeColors();
 
-  const [limitsRows, datesRows, policyRows, carrierRows, carrierGroupRows, insuranceProgramRows] =
+  const [limitsRows, datesRows, policyRows, carrierRows, carrierGroupRows, insuranceProgramRows, policyLimitTypeRows] =
     await Promise.all([
     fetchCSV(csvUrl),
     fetchCSV(policyDatesUrl),
     fetchCSV(policyUrl),
     fetchCSV(carrierUrl),
     fetchCSV(carrierGroupUrl),
-    fetchInsuranceProgramRows(insuranceProgramUrl)
+    fetchInsuranceProgramRows(insuranceProgramUrl),
+    fetchCSV(policyLimitTypeUrl)
   ]);
 
   const built = buildSlices({
@@ -998,6 +1693,7 @@ export async function renderCoverageChart({
     carrierRows,
     carrierGroupRows,
     insuranceProgramRows,
+    policyLimitTypeRows,
     useYearAxis
   });
 
@@ -1023,7 +1719,9 @@ export async function renderCoverageChart({
       endYear: null,
       zoomMin: null,
       zoomMax: null,
+      sirMode: _cache.filters?.sirMode || "off",
       insuranceProgram: "",
+      policyLimitType: "",
       carriers: [],
       carrierGroups: []
     }
@@ -1039,6 +1737,11 @@ export async function renderCoverageChart({
     categorySpacing,
     quotaKeySet: _cache.quotaKeySet
   });
+  const sirDataset = buildSirDataset({
+    slices: _cache.slices,
+    xLabels: _cache.xLabels,
+    sirMode: _cache.filters?.sirMode
+  });
 
   if (chart) chart.destroy();
 
@@ -1046,30 +1749,41 @@ export async function renderCoverageChart({
     type: "bar",
     data: {
       labels: _cache.xLabels,
-      datasets
+      datasets: sirDataset ? [...datasets, sirDataset] : datasets
     },
     plugins: [outlineBarsPlugin, quotaShareGuidesPlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
+      interaction: {
+        mode: "nearest",
+        intersect: true
+      },
       layout: {
         // Keep bars/outline away from the extreme plot edges without using x.offset,
         // which can break floating + non-grouped bar geometry in this chart.
-        padding: { left: 14, right: 24 }
+        padding: { left: 8, right: 24 }
       },
 
       plugins: {
         outlineBars: {
           lineWidth: outlineWidth,
-          color: "rgba(15,23,42,0.42)"
+          color: themeColors.outline
         },
         legend: {
           display: true,
           position: "right",
           align: "start",
+          title: {
+            display: true,
+            text: legendTitleForView(currentView),
+            color: themeColors.legendText,
+            font: { size: 12, weight: "600" },
+            padding: 8
+          },
           labels: {
-            color: "rgba(255,255,255,0.95)",
+            color: themeColors.legendText,
             boxWidth: 9,
             boxHeight: 9,
             padding: 10,
@@ -1078,10 +1792,15 @@ export async function renderCoverageChart({
         },
         tooltip: {
           displayColors: false,
+          mode: "nearest",
+          intersect: true,
+          filter: (_item, index) => index === 0,
           callbacks: {
             title: (items) => {
               const raw = items?.[0]?.raw || {};
               const yr = String(raw.x ?? "");
+              const ds = items?.[0]?.dataset || {};
+              if (ds?.datasetId === "sirOverlay") return `${yr} — ${ds.label || "SIR"}`;
 
               if (raw.isQuotaShare) return `${yr} — Quota share`;
 
@@ -1089,6 +1808,11 @@ export async function renderCoverageChart({
               return g ? `${yr} — ${g}` : yr;
             },
             label: (ctx) => {
+              if (ctx?.dataset?.datasetId === "sirOverlay") {
+                const val = Number(ctx?.raw?.y ?? ctx?.parsed?.y ?? 0);
+                return [`${ctx.dataset.label}: ${money(val)}`];
+              }
+
               const r = ctx.raw || {};
               const attach = r.attach ?? 0;
               const top = r.top ?? 0;
@@ -1098,13 +1822,32 @@ export async function renderCoverageChart({
               lines.push(`Attach: ${money(attach)}`);
               lines.push(`Limit: ${money(lim)}`);
               lines.push(`Top: ${money(top)}`);
+              const sirValsPerOcc = (Array.isArray(r.participants) ? r.participants : [])
+                .map((p) => Number(p?.sirPerOcc || 0))
+                .filter((v) => Number.isFinite(v) && v > 0);
+              const sirValsAgg = (Array.isArray(r.participants) ? r.participants : [])
+                .map((p) => Number(p?.sirAggregate || 0))
+                .filter((v) => Number.isFinite(v) && v > 0);
+              if (sirValsPerOcc.length) {
+                const min = Math.min(...sirValsPerOcc);
+                const max = Math.max(...sirValsPerOcc);
+                lines.push(`SIR (Per Occ): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
+              }
+              if (sirValsAgg.length) {
+                const min = Math.min(...sirValsAgg);
+                const max = Math.max(...sirValsAgg);
+                lines.push(`SIR (Aggregate): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
+              }
 
               const parts = Array.isArray(r.participants) ? r.participants : [];
+              const quotaParts = r.isQuotaShare && r.quotaGroupKey
+                ? parts.filter((p) => String(p?.quotaGroupKey || "") === String(r.quotaGroupKey))
+                : parts;
               const isUnavailableGroup = String(r.group || "").toLowerCase() === "unavailable";
-              const shouldShowParts = parts.length > 1 || String(r.group || "") === "Quota share";
+              const shouldShowParts = !!r.isQuotaShare && quotaParts.length > 1;
 
-              if (isUnavailableGroup && parts.length) {
-                const uniqueCarriers = [...new Set(parts.map((p) => p.carrier || "(unknown carrier)"))];
+              if (isUnavailableGroup && quotaParts.length) {
+                const uniqueCarriers = [...new Set(quotaParts.map((p) => p.carrier || "(unknown carrier)"))];
                 const carrierLine =
                   uniqueCarriers.length === 1
                     ? `Carrier: ${uniqueCarriers[0]}`
@@ -1112,27 +1855,18 @@ export async function renderCoverageChart({
                 lines.push(carrierLine);
               }
 
-              if (r.isQuotaShare && parts.length) {
-                const uniqueQuotaCarriers = [...new Set(parts.map((p) => p.carrier || "(unknown carrier)"))];
-                const quotaCarrierLine =
-                  uniqueQuotaCarriers.length === 1
-                    ? `Carrier: ${uniqueQuotaCarriers[0]}`
-                    : `Carriers: ${uniqueQuotaCarriers.join(", ")}`;
-                lines.push(quotaCarrierLine);
-              }
+              if (shouldShowParts && quotaParts.length) {
+                lines.push(`Quota share participants (${quotaParts.length}):`);
 
-              if (shouldShowParts && parts.length) {
-                lines.push(`Quota share participants (${parts.length}):`);
-
-                const show = parts.slice(0, tooltipMaxParticipants);
+                const show = quotaParts.slice(0, tooltipMaxParticipants);
                 for (const p of show) {
                   const carrier = p.carrier || "(unknown carrier)";
                   const polno = p.policy_no ? ` (${p.policy_no})` : "";
                   lines.push(`• ${carrier}${polno}: ${money(p.sliceLimit)}`);
                 }
 
-                if (parts.length > tooltipMaxParticipants) {
-                  lines.push(`… +${parts.length - tooltipMaxParticipants} more`);
+                if (quotaParts.length > tooltipMaxParticipants) {
+                  lines.push(`… +${quotaParts.length - tooltipMaxParticipants} more`);
                 }
               }
 
@@ -1148,31 +1882,36 @@ export async function renderCoverageChart({
           offset: true,
           grid: {
             display: true,
-            color: "rgba(255,255,255,0.06)",
+            color: themeColors.xGrid,
             lineWidth: 1
           },
           ticks: {
-            color: "rgba(255,255,255,0.92)",
+            color: themeColors.axisTicks,
             autoSkip: false,
             maxRotation: 0,
             minRotation: 0
+          },
+          title: {
+            display: true,
+            text: "Policy Years",
+            color: themeColors.yTitle
           }
         },
         y: {
           beginAtZero: true,
           grid: {
             display: true,
-            color: "rgba(255,255,255,0.08)",
+            color: themeColors.yGrid,
             lineWidth: 1
           },
           ticks: {
-            color: "rgba(255,255,255,0.95)",
-            callback: (v) => "$" + Number(v).toLocaleString()
+            color: themeColors.axisTicks,
+            callback: (v) => compactMoney(v)
           },
           title: {
             display: true,
             text: "Coverage Limits",
-            color: "rgba(255,255,255,0.95)"
+            color: themeColors.yTitle
           }
         }
       }
@@ -1183,6 +1922,7 @@ export async function renderCoverageChart({
   // Defer width sync so the viewport has final layout dimensions.
   requestAnimationFrame(() => {
     if (!chart) return;
+    applyChartTheme();
     syncChartViewportWidth();
     // Rebuild once after first layout so auto bar width can use the real x-scale width
     // (prevents gaps/overlap when legend placement changes plot width).

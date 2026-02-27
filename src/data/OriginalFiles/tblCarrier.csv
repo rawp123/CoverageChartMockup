@@ -1,20 +1,20 @@
-﻿CarrierID,CarrierName,CarrierSolvency,CarrierGroupID,,
-1,Hartford Insurance Co.,Solvent,1,,
-2,London Market,Solvent,7,,
-3,Continental Casualty,Solvent,2,,
-4,Aetna Casualty and Surety Company,Solvent,4,,
-5,California Union Insurance Company,Solvent,3,,
-6,Harbor Insurance Company,Solvent,2,,
-7,Insurance Company of North America,Solvent,3,,
-8,Midland,Insolvent,5,,
-9,Home,Insolvent,6,,
-10,First State Insurance Company,Solvent,1,,
-11,Travelers Indemnity,Solvent,4,,
-12,Lexington,Solvent,8,,
-13,American Home,Solvent,8,,
-14,"National Union Fire Insurance Co. of Pittsburgh, PA",Solvent,8,,
-15,Granite State Insurance Company,Solvent,8,,
-16,Zurich American Insurance Company,Solvent,9,,
-17,Chubb Insurance Company,Solvent,10,,
-18,Fireman's Fund Insurance Company,Solvent,11,,
-19,Mission Insurance Company,Insolvent,5,,
+CarrierID,CarrierName,CarrierSolvency,CarrierGroupID
+1,Hartford Insurance Co.,Solvent,1
+2,London Market,Solvent,7
+3,Continental Casualty,Solvent,2
+4,Aetna Casualty and Surety Company,Solvent,4
+5,California Union Insurance Company,Solvent,3
+6,Harbor Insurance Company,Solvent,2
+7,Insurance Company of North America,Solvent,3
+8,Midland,Insolvent,5
+9,Home,Insolvent,6
+10,First State Insurance Company,Solvent,1
+11,Travelers Indemnity,Solvent,4
+12,Lexington,Solvent,8
+13,American Home,Solvent,8
+14,"National Union Fire Insurance Co. of Pittsburgh, PA",Solvent,8
+15,Granite State Insurance Company,Solvent,8
+16,Zurich American Insurance Company,Solvent,9
+17,Chubb Insurance Company,Solvent,10
+18,Fireman's Fund Insurance Company,Solvent,11
+19,Mission Insurance Company,Insolvent,5
