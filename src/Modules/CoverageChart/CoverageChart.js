@@ -32,6 +32,7 @@ let _cache = {
     endYear: null,
     zoomMin: null,
     zoomMax: null,
+    insuranceProgram: "",
     carriers: [],
     carrierGroups: []
   }
@@ -255,6 +256,16 @@ async function fetchCSV(url) {
   return parseCSV(await res.text());
 }
 
+async function fetchInsuranceProgramRows(primaryUrl) {
+  try {
+    return await fetchCSV(primaryUrl);
+  } catch (err) {
+    const fallbackUrl = "/data/OriginalFiles/tblInsuranceprogramid.csv";
+    if (String(primaryUrl) === fallbackUrl) throw err;
+    return await fetchCSV(fallbackUrl);
+  }
+}
+
 /* ================================
    Availability classifier (heuristic)
 ================================ */
@@ -310,7 +321,15 @@ function classifyAvailability(policyRow, carrierRow) {
    Build base "slices"
 ================================ */
 
-function buildSlices({ limitsRows, datesRows, policyRows, carrierRows, carrierGroupRows, useYearAxis }) {
+function buildSlices({
+  limitsRows,
+  datesRows,
+  policyRows,
+  carrierRows,
+  carrierGroupRows,
+  insuranceProgramRows,
+  useYearAxis
+}) {
   const policyDateMap = {};
   let minYear = Infinity;
   let maxYear = -Infinity;
@@ -348,6 +367,14 @@ function buildSlices({ limitsRows, datesRows, policyRows, carrierRows, carrierGr
     if (nm) carrierGroupNameById[id] = nm;
   }
 
+  const insuranceProgramNameById = {};
+  for (const r of insuranceProgramRows || []) {
+    const id = String(getBy(r, "InsuranceProgramID", "Insurance Program ID", "ID")).trim();
+    if (!id) continue;
+    const nm = String(getBy(r, "InsuranceProgram", "Program", "Name")).trim();
+    if (nm) insuranceProgramNameById[id] = nm;
+  }
+
   const policyInfoById = {};
   for (const r of policyRows) {
     const pid = String(getBy(r, "PolicyID", "Policy Id", "ID")).trim();
@@ -374,6 +401,12 @@ function buildSlices({ limitsRows, datesRows, policyRows, carrierRows, carrierGr
         const policyNo = String(
           getBy(r, "policy_no", "PolicyNo", "Policy Number", "PolicyNumber")
         ).trim();
+        const insuranceProgramId = String(
+          getBy(r, "InsuranceProgramID", "Insurance Program ID")
+        ).trim();
+        const insuranceProgram =
+          String(getBy(r, "InsuranceProgram", "Program", "ProgramName")).trim() ||
+          (insuranceProgramId ? insuranceProgramNameById[insuranceProgramId] || "" : "");
 
         const cRow = carrierId ? carrierRowById[carrierId] : null;
         const availability = classifyAvailability(r, cRow);
@@ -382,6 +415,7 @@ function buildSlices({ limitsRows, datesRows, policyRows, carrierRows, carrierGr
           policy_no: policyNo,
           carrier: carrierName || "(unknown carrier)",
           carrierGroup: carrierGroupName || "(unknown group)",
+          insuranceProgram: insuranceProgram || "(unknown program)",
           availability,
         };
   }
@@ -429,6 +463,7 @@ function buildSlices({ limitsRows, datesRows, policyRows, carrierRows, carrierGr
       policy_no: info.policy_no,
       carrier: info.carrier,
       carrierGroup: info.carrierGroup,
+      insuranceProgram: info.insuranceProgram,
       availability: info.availability
     });
   }
@@ -465,6 +500,7 @@ function applyFiltersToCache() {
   const { allSlices, allXLabels, useYearAxis, filters } = _cache;
   const startYear = Number.isFinite(filters.startYear) ? filters.startYear : null;
   const endYear = Number.isFinite(filters.endYear) ? filters.endYear : null;
+  const selectedProgram = String(filters.insuranceProgram || "").trim();
 
   let filteredSlices = allSlices.slice();
   if (useYearAxis && (startYear !== null || endYear !== null)) {
@@ -474,6 +510,12 @@ function applyFiltersToCache() {
       if (endYear !== null && s.year > endYear) return false;
       return true;
     });
+  }
+
+  if (selectedProgram) {
+    filteredSlices = filteredSlices.filter(
+      (s) => String(s?.insuranceProgram || "").trim() === selectedProgram
+    );
   }
 
   let filteredXLabels = allXLabels.slice();
@@ -814,19 +856,36 @@ export function getYearBounds() {
 export function getFilterOptions() {
   const carrierSet = new Set();
   const carrierGroupSet = new Set();
+  const insuranceProgramSet = new Set();
   for (const s of _cache.allSlices || []) {
     const c = String(s?.carrier || "").trim();
     const g = String(s?.carrierGroup || "").trim();
+    const p = String(s?.insuranceProgram || "").trim();
     if (c && c !== "(unknown carrier)") carrierSet.add(c);
     if (g && g !== "(unknown group)") carrierGroupSet.add(g);
+    if (p && p !== "(unknown program)") insuranceProgramSet.add(p);
   }
 
   return {
+    insurancePrograms: Array.from(insuranceProgramSet).sort((a, b) => a.localeCompare(b)),
     carriers: Array.from(carrierSet).sort((a, b) => a.localeCompare(b)),
     carrierGroups: Array.from(carrierGroupSet).sort((a, b) => a.localeCompare(b)),
+    selectedInsuranceProgram: String(_cache.filters?.insuranceProgram || "").trim(),
     selectedCarriers: normalizeStringList(_cache.filters?.carriers),
     selectedCarrierGroups: normalizeStringList(_cache.filters?.carrierGroups)
   };
+}
+
+export function setInsuranceProgramFilter(insuranceProgram) {
+  _cache.filters.insuranceProgram = String(insuranceProgram || "").trim();
+  applyFiltersToCache();
+  rebuildChart();
+}
+
+export function resetInsuranceProgramFilter() {
+  _cache.filters.insuranceProgram = "";
+  applyFiltersToCache();
+  rebuildChart();
 }
 
 export function setEntityFilters({ carriers, carrierGroups } = {}) {
@@ -902,6 +961,7 @@ export async function renderCoverageChart({
   policyUrl = "/data/OriginalFiles/tblPolicy.csv",
   carrierUrl = "/data/OriginalFiles/tblCarrier.csv",
   carrierGroupUrl = "/data/OriginalFiles/tblCarrierGroup.csv",
+  insuranceProgramUrl = "/data/OriginalFiles/tblInsuranceProgram.csv",
 
   useYearAxis = true,
 
@@ -921,12 +981,14 @@ export async function renderCoverageChart({
     ? initialView
     : "carrier";
 
-  const [limitsRows, datesRows, policyRows, carrierRows, carrierGroupRows] = await Promise.all([
+  const [limitsRows, datesRows, policyRows, carrierRows, carrierGroupRows, insuranceProgramRows] =
+    await Promise.all([
     fetchCSV(csvUrl),
     fetchCSV(policyDatesUrl),
     fetchCSV(policyUrl),
     fetchCSV(carrierUrl),
-    fetchCSV(carrierGroupUrl)
+    fetchCSV(carrierGroupUrl),
+    fetchInsuranceProgramRows(insuranceProgramUrl)
   ]);
 
   const built = buildSlices({
@@ -935,6 +997,7 @@ export async function renderCoverageChart({
     policyRows,
     carrierRows,
     carrierGroupRows,
+    insuranceProgramRows,
     useYearAxis
   });
 
@@ -960,6 +1023,7 @@ export async function renderCoverageChart({
       endYear: null,
       zoomMin: null,
       zoomMax: null,
+      insuranceProgram: "",
       carriers: [],
       carrierGroups: []
     }

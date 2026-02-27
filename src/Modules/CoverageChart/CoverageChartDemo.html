@@ -30,6 +30,15 @@
             </div>
           </div>
 
+          <div class="controlPanel controlPanel--program">
+            <div class="controlBlock">
+              <label for="insuranceProgramSelect">Insurance Program</label>
+              <select id="insuranceProgramSelect">
+                <option value="">All Programs</option>
+              </select>
+            </div>
+          </div>
+
           <div class="controlPanel controlPanel--years">
             <div class="inlinePair">
               <div class="controlBlock">
@@ -114,6 +123,8 @@
       getYearBounds,
       setYearRange,
       resetYearRange,
+      setInsuranceProgramFilter,
+      resetInsuranceProgramFilter,
       setEntityFilters,
       resetEntityFilters,
       setZoomRange,
@@ -147,6 +158,7 @@
 
         const startYearSelect = document.getElementById("startYearSelect");
         const endYearSelect = document.getElementById("endYearSelect");
+        const insuranceProgramSelect = document.getElementById("insuranceProgramSelect");
         const carrierDropdownMenu = document.getElementById("carrierDropdownMenu");
         const carrierGroupDropdownMenu = document.getElementById("carrierGroupDropdownMenu");
         const carrierDropdownLabel = document.getElementById("carrierDropdownLabel");
@@ -193,6 +205,12 @@
 
         buildCheckboxMenu(carrierDropdownMenu, filterOptions.carriers, "carrier_filter");
         buildCheckboxMenu(carrierGroupDropdownMenu, filterOptions.carrierGroups, "carrier_group_filter");
+        for (const program of filterOptions.insurancePrograms || []) {
+          const opt = document.createElement("option");
+          opt.value = program;
+          opt.textContent = program;
+          insuranceProgramSelect.appendChild(opt);
+        }
 
         function applyYearFilters() {
           const toYear = (v) => {
@@ -219,6 +237,10 @@
 
         function applyZoomFilters() {
           setZoomRange(zoomMinInput.value, zoomMaxInput.value);
+        }
+
+        function applyInsuranceProgramFilter() {
+          setInsuranceProgramFilter(insuranceProgramSelect.value);
         }
 
         function selectedValuesFromCheckboxMenu(container) {
@@ -254,6 +276,7 @@
         endYearSelect.addEventListener("input", applyYearFilters);
         endYearSelect.addEventListener("change", applyYearFilters);
         endYearSelect.addEventListener("blur", applyYearFilters);
+        insuranceProgramSelect.addEventListener("change", applyInsuranceProgramFilter);
 
         zoomMinInput.addEventListener("change", applyZoomFilters);
         zoomMaxInput.addEventListener("change", applyZoomFilters);
@@ -272,10 +295,12 @@
         resetAllBtn.addEventListener("click", () => {
           startYearSelect.value = "";
           endYearSelect.value = "";
+          insuranceProgramSelect.value = "";
           zoomMinInput.value = "";
           zoomMaxInput.value = "";
           resetEntityFilterUI();
           resetYearRange();
+          resetInsuranceProgramFilter();
           resetZoomRange();
           resetEntityFilters();
         });
