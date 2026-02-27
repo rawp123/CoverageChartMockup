@@ -11,6 +11,8 @@
 
 let chart = null;
 let currentView = "carrier";
+let _responsiveResizeBound = false;
+let _responsiveResizeTimer = null;
 
 let _cache = {
   allSlices: [],
@@ -27,6 +29,8 @@ let _cache = {
     surface: null
   },
   _wheelBound: false,
+  hiddenLegendCarriers: new Set(),
+  hiddenLegendCarrierGroups: new Set(),
   showCoverageTotals: true,
   filters: {
     startYear: null,
@@ -38,6 +42,7 @@ let _cache = {
     sirMode: "off",
     insuranceProgram: "",
     policyLimitType: "",
+    annualized: false,
     carriers: [],
     carrierGroups: []
   }
@@ -187,6 +192,7 @@ function getLegendFilterLines() {
   return [
     `Program: ${String(f.insuranceProgram || "(none)")}`,
     `Policy Limit Type: ${String(f.policyLimitType || "(none)")}`,
+    `Annualized: ${f.annualized ? "On" : "Off"}`,
     `Years: ${yearsText}`,
     `Carriers: ${summarizeFilterSelection(f.carriers, "carrier", "All carriers")}`,
     `Carrier Groups: ${summarizeFilterSelection(f.carrierGroups, "group", "All groups")}`,
@@ -230,6 +236,69 @@ const getChartThemeColors = (themeName = getThemeName()) => {
   };
 };
 
+function getResponsiveMode() {
+  const w = Number(typeof window !== "undefined" ? window.innerWidth : 1600);
+  return Number.isFinite(w) && w <= 1200 ? "small" : "large";
+}
+
+function applyResponsiveChartSettings(updateMode = "none") {
+  if (!chart) return;
+  const mode = getResponsiveMode();
+  const isSmall = mode === "small";
+  const legend = chart.options?.plugins?.legend;
+  const x = chart.options?.scales?.x;
+  const y = chart.options?.scales?.y;
+
+  if (legend) {
+    legend.position = isSmall ? "bottom" : "right";
+    legend.align = "start";
+    legend.maxWidth = isSmall ? undefined : 300;
+    legend.maxHeight = isSmall ? 140 : 560;
+    legend.labels = {
+      ...(legend.labels || {}),
+      boxWidth: isSmall ? 8 : 9,
+      boxHeight: isSmall ? 8 : 9,
+      padding: isSmall ? 8 : 10,
+      font: { size: isSmall ? 10 : 11 }
+    };
+    if (legend.title) {
+      legend.title.font = { size: isSmall ? 11 : 12, weight: "600" };
+      legend.title.padding = isSmall ? 6 : 8;
+    }
+  }
+
+  if (x?.ticks) {
+    x.ticks.font = { size: isSmall ? 10 : 12 };
+    x.ticks.autoSkip = isSmall;
+    x.ticks.maxTicksLimit = isSmall ? 10 : undefined;
+    x.ticks.maxRotation = isSmall ? 28 : 0;
+    x.ticks.minRotation = isSmall ? 18 : 0;
+  }
+  if (y?.ticks) {
+    y.ticks.font = { size: isSmall ? 10 : 12 };
+    y.ticks.autoSkip = true;
+    y.ticks.maxTicksLimit = isSmall ? 6 : 9;
+  }
+
+  chart.resize();
+  chart.update(updateMode);
+}
+
+function bindResponsiveResizeHandler() {
+  if (_responsiveResizeBound || typeof window === "undefined") return;
+  window.addEventListener(
+    "resize",
+    () => {
+      if (_responsiveResizeTimer) window.clearTimeout(_responsiveResizeTimer);
+      _responsiveResizeTimer = window.setTimeout(() => {
+        applyResponsiveChartSettings("none");
+      }, 100);
+    },
+    { passive: true }
+  );
+  _responsiveResizeBound = true;
+}
+
 const getBy = (obj, ...candidates) => {
   if (!obj) return "";
   const map = {};
@@ -246,6 +315,20 @@ function normalizeHeader(h) {
 }
 
 const _colorSpecByKey = new Map();
+const _distinctPaletteDark = [
+  "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948",
+  "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC", "#2F4B7C", "#A05195",
+  "#D45087", "#FF7C43", "#665191", "#003F5C", "#EF5675", "#FFA600",
+  "#1F77B4", "#17BECF", "#9467BD", "#8C564B", "#BCBD22", "#E377C2",
+  "#2CA02C", "#D62728", "#8DD3C7", "#FB8072", "#80B1D3", "#FDB462"
+];
+const _distinctPaletteLight = [
+  "#2F5D8A", "#A95E16", "#B04747", "#2E7F7A", "#3D7B35", "#8D7420",
+  "#7A5A86", "#B86473", "#6F533F", "#5F6368", "#233A60", "#6D3F73",
+  "#A13E6A", "#B85A2C", "#4F3E7A", "#1D3852", "#A9466A", "#B06F00",
+  "#215F97", "#187A94", "#6E55A2", "#6D4D3F", "#7A7B1E", "#9A4D94",
+  "#2C7A2C", "#A83E3E", "#3A8A84", "#B05A56", "#4E6EA2", "#A87739"
+];
 
 const normalizeHue = (h) => {
   const n = Number(h);
@@ -272,53 +355,27 @@ function colorFromString(str) {
   const s = String(str ?? "").trim().toLowerCase() || "(blank)";
   if (!_colorSpecByKey.has(s)) {
     const hash = hashString(s);
-    const seedHue = normalizeHue(hash % 360);
-    const usedHues = Array.from(_colorSpecByKey.values()).map((v) => Number(v?.hue || 0));
-
-    let chosenHue = seedHue;
-    let bestDistance = -1;
-    let bestSeedDistance = 181;
-
-    // Distance-aware hue selection keeps nearby carriers visually distinct.
-    // Evaluate the full hue wheel, then tie-break toward the hash seed.
-    for (let candidate = 0; candidate < 360; candidate++) {
-      if (!usedHues.length) {
-        chosenHue = seedHue;
-        bestDistance = 180;
-        bestSeedDistance = 0;
+    const paletteSize = _distinctPaletteDark.length;
+    const usedSlots = new Set(Array.from(_colorSpecByKey.values()).map((v) => Number(v?.slot)));
+    const seedSlot = hash % paletteSize;
+    // Probe across the palette with a coprime step so active keys avoid
+    // collisions as long as there are remaining free slots.
+    const step = 7;
+    let chosenSlot = seedSlot;
+    for (let i = 0; i < paletteSize; i++) {
+      const candidate = (seedSlot + i * step) % paletteSize;
+      if (!usedSlots.has(candidate)) {
+        chosenSlot = candidate;
         break;
       }
-
-      let minDistance = 180;
-      for (const used of usedHues) {
-        minDistance = Math.min(minDistance, hueDistance(candidate, used));
-        if (minDistance < bestDistance) break;
-      }
-      const seedDistance = hueDistance(candidate, seedHue);
-      if (
-        minDistance > bestDistance ||
-        (minDistance === bestDistance && seedDistance < bestSeedDistance)
-      ) {
-        bestDistance = minDistance;
-        bestSeedDistance = seedDistance;
-        chosenHue = candidate;
-      }
     }
-
-    const tone = hash % 3;
-    _colorSpecByKey.set(s, { hue: chosenHue, tone });
+    _colorSpecByKey.set(s, { slot: chosenSlot });
   }
 
-  const spec = _colorSpecByKey.get(s) || { hue: 210, tone: 0 };
+  const spec = _colorSpecByKey.get(s) || { slot: 0 };
   const isLight = getThemeName() === "light";
-  const satPalette = isLight ? [80, 74, 86] : [74, 80, 86];
-  const lightPalette = isLight ? [42, 48, 36] : [58, 54, 62];
-  const tone = clamp(Number(spec.tone || 0), 0, satPalette.length - 1);
-  const sat = satPalette[tone];
-  const light = lightPalette[tone];
-  const hue = Math.round(normalizeHue(spec.hue));
-
-  return `hsl(${hue}, ${sat}%, ${light}%)`;
+  const slot = clamp(Number(spec.slot || 0), 0, _distinctPaletteDark.length - 1);
+  return isLight ? _distinctPaletteLight[slot] : _distinctPaletteDark[slot];
 }
 
 /* ================================
@@ -390,7 +447,9 @@ const quotaShareGuidesPlugin = {
         const raw = ds.data?.[pi];
         if (!raw || !raw.isQuotaShare) return;
 
-        const parts = Array.isArray(raw.participants) ? raw.participants : [];
+        const hideUnavailable = isUnavailableLegendHidden(chart);
+        const parts = (Array.isArray(raw.participants) ? raw.participants : [])
+          .filter((p) => !hideUnavailable || !String(p?.availability || "").toLowerCase().includes("unavail"));
         if (parts.length < 2) return;
 
         const props = bar.getProps(["x", "width"], false);
@@ -412,6 +471,14 @@ const quotaShareGuidesPlugin = {
     ctx.restore();
   }
 };
+
+function isUnavailableLegendHidden(chartInstance) {
+  if (!chartInstance || !Array.isArray(chartInstance?.data?.datasets)) return false;
+  const dsIndex = chartInstance.data.datasets.findIndex((d) => String(d?.label || "") === "Unavailable");
+  if (dsIndex < 0) return false;
+  const meta = chartInstance.getDatasetMeta(dsIndex);
+  return !!meta?.hidden;
+}
 
 const legendTitleBadgePlugin = {
   id: "legendTitleBadge",
@@ -1352,7 +1419,7 @@ function rebuildChart() {
     chart.options.plugins.legend.title.text = legendTitleForView(currentView);
   }
 
-  chart.update();
+  applyResponsiveChartSettings("none");
   syncChartViewportWidth();
 }
 
@@ -1364,6 +1431,7 @@ function applyChartTheme(themeName = getThemeName()) {
   chart.options.plugins.legend.title.color = c.legendText;
   chart.options.scales.x.grid.color = c.xGrid;
   chart.options.scales.x.ticks.color = c.axisTicks;
+  chart.options.scales.x.title.color = c.yTitle;
   chart.options.scales.y.grid.color = c.yGrid;
   chart.options.scales.y.ticks.color = c.axisTicks;
   chart.options.scales.y.title.color = c.yTitle;
@@ -1374,7 +1442,7 @@ function applyChartTheme(themeName = getThemeName()) {
     sirDs.pointBackgroundColor = sirColor;
     sirDs.pointBorderColor = sirColor;
   }
-  chart.update();
+  applyResponsiveChartSettings("none");
 }
 
 /* ================================
@@ -1387,16 +1455,32 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   const isUnavailable = (s) => String(s?.availability || "").toLowerCase().includes("unavail");
   const selection = getSelectionSets();
   const usingYearAxis = !!_cache.useYearAxis;
+  const annualized = !!_cache.filters?.annualized;
+  const hiddenCarriers = _cache.hiddenLegendCarriers || new Set();
+  const hiddenCarrierGroups = _cache.hiddenLegendCarrierGroups || new Set();
+  const isHiddenBySyntheticLegend = (s) => {
+    if (view === "carrier") {
+      const c = String(s?.carrier || "").trim();
+      return !!c && hiddenCarriers.has(c);
+    }
+    if (view === "carrierGroup") {
+      const g = String(s?.carrierGroup || "").trim();
+      return !!g && hiddenCarrierGroups.has(g);
+    }
+    return false;
+  };
 
   const keyOf = (s) => {
-    // Collapse all unavailable slices into a single dataset/legend item in every view.
-    if (isUnavailable(s)) return "Unavailable";
-
     if (view === "carrier" || view === "carrierGroup") {
-      // Prevent gaps: force quota layers into one dataset for both views.
+      // Keep quota-share rollup for both carrier and carrier-group views so
+      // concurrent quota participants do not overdraw each other.
       if (isQuotaSlice(s)) return "Quota share";
+      // Non-quota unavailable slices are still collapsed into one dataset.
+      if (isUnavailable(s)) return "Unavailable";
       return view === "carrier" ? (s.carrier || "(unknown carrier)") : (s.carrierGroup || "(unknown group)");
     }
+    // For non-carrier views, keep unavailable layers grouped.
+    if (isUnavailable(s)) return "Unavailable";
     return s.availability || "Available";
   };
 
@@ -1415,6 +1499,7 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   if (usingYearAxis) {
     const bucketMap = new Map();
     for (const s of slices) {
+      if (isHiddenBySyntheticLegend(s)) continue;
       const group = keyOf(s);
       groups.add(group);
 
@@ -1424,7 +1509,10 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
       if (!Number.isFinite(xStartValue) || !Number.isFinite(xEndValue) || !(xEndValue > xStartValue)) continue;
       const xMidValue = (xStartValue + xEndValue) / 2;
       const yearLabel = yearLabelFromAxisValue(xMidValue);
-      const quotaGroupKey = group === "Quota share" ? sliceQuotaKey : "";
+      const quotaGroupKey =
+        (view === "carrier" || view === "carrierGroup") && isQuotaSlice(s)
+          ? sliceQuotaKey
+          : "";
       // Year-mode day-accurate bucket: (group, attachment, quotaGroupKey).
       const k = `${group}||${s.attach}||${quotaGroupKey}`;
       if (!bucketMap.has(k)) {
@@ -1485,6 +1573,8 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
             policy_no: src?.policy_no,
             policyStartMs: Number(src?.policyStartMs || 0),
             policyEndMs: Number(src?.policyEndMs || 0),
+            segmentStartMs: Number(src?.yearOverlapStartMs || src?.policyStartMs || 0),
+            segmentEndMs: Number(src?.yearOverlapEndMs || src?.policyEndMs || 0),
             sliceLimit: limit,
             xStartValue: segStart,
             xEndValue: segEnd,
@@ -1509,25 +1599,29 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
         });
       }
 
-      // Merge adjacent segments when the active participant set is unchanged.
-      const mergedSegments = [];
-      const eps = 1e-9;
-      for (const seg of rawSegments) {
-        const prev = mergedSegments[mergedSegments.length - 1];
-        if (
-          prev &&
-          Math.abs(Number(prev.segEnd) - Number(seg.segStart)) < eps &&
-          prev.signature === seg.signature &&
-          Math.abs(Number(prev.segLimit) - Number(seg.segLimit)) < eps
-        ) {
-          prev.segEnd = seg.segEnd;
-          prev.hasSelectionMatch = prev.hasSelectionMatch || seg.hasSelectionMatch;
-        } else {
-          mergedSegments.push({ ...seg });
+      const finalSegments = [];
+      if (annualized) {
+        for (const seg of rawSegments) finalSegments.push({ ...seg });
+      } else {
+        // Merge adjacent segments when the active participant set is unchanged.
+        const eps = 1e-9;
+        for (const seg of rawSegments) {
+          const prev = finalSegments[finalSegments.length - 1];
+          if (
+            prev &&
+            Math.abs(Number(prev.segEnd) - Number(seg.segStart)) < eps &&
+            prev.signature === seg.signature &&
+            Math.abs(Number(prev.segLimit) - Number(seg.segLimit)) < eps
+          ) {
+            prev.segEnd = seg.segEnd;
+            prev.hasSelectionMatch = prev.hasSelectionMatch || seg.hasSelectionMatch;
+          } else {
+            finalSegments.push({ ...seg });
+          }
         }
       }
 
-      for (const seg of mergedSegments) {
+      for (const seg of finalSegments) {
         const segMid = (Number(seg.segStart) + Number(seg.segEnd)) / 2;
         const yearLabel = yearLabelFromAxisValue(segMid);
         const layerKey = `${bucket.group}||${bucket.attach}||${Number(seg.segStart).toFixed(9)}||${Number(seg.segEnd).toFixed(9)}||${bucket.quotaGroupKey}`;
@@ -1637,11 +1731,15 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
     */
   } else {
     for (const s of slices) {
+      if (isHiddenBySyntheticLegend(s)) continue;
       const group = keyOf(s);
       groups.add(group);
 
       const sliceQuotaKey = qaKey(s);
-      const quotaGroupKey = group === "Quota share" ? sliceQuotaKey : "";
+      const quotaGroupKey =
+        (view === "carrier" || view === "carrierGroup") && isQuotaSlice(s)
+          ? sliceQuotaKey
+          : "";
       const k = `${group}||${s.x}||${s.attach}||${quotaGroupKey}`;
       if (!layerMap.has(k)) {
         layerMap.set(k, {
@@ -1740,14 +1838,59 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   const autoBarThickness = Math.max(8, Math.floor(slotWidth));
   const barThicknessPx = useFlexBarWidth ? autoBarThickness : requestedBarThickness;
   const quotaGradientForCarrierView = (context, pointRaw) => {
-    const parts = Array.isArray(pointRaw?.participants) ? pointRaw.participants : [];
+    const hideUnavailable = isUnavailableLegendHidden(context?.chart);
+    const parts = (Array.isArray(pointRaw?.participants) ? pointRaw.participants : [])
+      .filter((p) => !hideUnavailable || !String(p?.availability || "").toLowerCase().includes("unavail"));
     const weightedParts = parts
       .map((p) => ({
         limit: Number(p?.sliceLimit || 0),
-        color: colorFromString(p?.carrier || "Quota share")
+        color: String(p?.availability || "").toLowerCase().includes("unavail")
+          ? "#94a3b8"
+          : colorFromString(p?.carrier || "Quota share")
       }))
       .filter((p) => Number.isFinite(p.limit) && p.limit > 0);
     if (!weightedParts.length) return colorFromString("Quota share");
+
+    const total = weightedParts.reduce((sum, p) => sum + p.limit, 0);
+    if (!Number.isFinite(total) || total <= 0) return weightedParts[0].color;
+
+    const chartInstance = context?.chart;
+    const yScale = chartInstance?.scales?.y;
+    const canvasCtx = chartInstance?.ctx;
+    if (!yScale || !canvasCtx) return weightedParts[0].color;
+
+    const top = Number(pointRaw?.top || 0);
+    const attach = Number(pointRaw?.attach || 0);
+    const yTop = yScale.getPixelForValue(top);
+    const yBottom = yScale.getPixelForValue(attach);
+    if (!Number.isFinite(yTop) || !Number.isFinite(yBottom)) return weightedParts[0].color;
+    if (yTop === yBottom) return weightedParts[0].color;
+    const gradient = canvasCtx.createLinearGradient(0, yBottom, 0, yTop);
+
+    let running = 0;
+    for (const p of weightedParts) {
+      const start = clamp(running / total, 0, 1);
+      running += p.limit;
+      const end = clamp(running / total, 0, 1);
+      gradient.addColorStop(start, p.color);
+      gradient.addColorStop(end, p.color);
+    }
+
+    return gradient;
+  };
+  const quotaGradientForCarrierGroupView = (context, pointRaw) => {
+    const hideUnavailable = isUnavailableLegendHidden(context?.chart);
+    const parts = (Array.isArray(pointRaw?.participants) ? pointRaw.participants : [])
+      .filter((p) => !hideUnavailable || !String(p?.availability || "").toLowerCase().includes("unavail"));
+    const weightedParts = parts
+      .map((p) => ({
+        limit: Number(p?.sliceLimit || 0),
+        color: String(p?.availability || "").toLowerCase().includes("unavail")
+          ? "#94a3b8"
+          : colorFromString(p?.carrierGroup || "Quota share")
+      }))
+      .filter((p) => Number.isFinite(p.limit) && p.limit > 0);
+    if (!weightedParts.length) return colorFromString(String(pointRaw?.group || "Quota share"));
 
     const total = weightedParts.reduce((sum, p) => sum + p.limit, 0);
     if (!Number.isFinite(total) || total <= 0) return weightedParts[0].color;
@@ -1803,6 +1946,7 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
         sumLimit: e.sumLimit,
         participants: e.participants,
         group,
+        annualized,
         isQuotaShare,
         quotaGroupKey: e.quotaGroupKey || "",
         isHighlighted: !selection.active || !!e.hasSelectionMatch
@@ -1844,12 +1988,15 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
 
     const mutedFill = "rgba(255,255,255,0.92)";
     const mutedBorder = "rgba(0,0,0,0.9)";
-    const isQuotaDataset = group === "Quota share";
+    const isQuotaDataset = points.some((p) => !!p?.isQuotaShare);
 
     return {
       label: group,
       data: points,
       parsing: { xAxisKey: "x", yAxisKey: "y" },
+      // Keep quota-share layers visually on top so split-color + dashed guides
+      // are not hidden by same-attachment carrier bars.
+      order: isQuotaDataset ? 100 : 10,
 
       grouped: false,
       barThickness: barThicknessPx,
@@ -1865,6 +2012,9 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
         if (!pointInFocus) return mutedFill;
         if (view === "carrier" && isQuotaDataset && raw?.isQuotaShare) {
           return quotaGradientForCarrierView(context, raw);
+        }
+        if (view === "carrierGroup" && isQuotaDataset && raw?.isQuotaShare) {
+          return quotaGradientForCarrierGroupView(context, raw);
         }
         return bg;
       },
@@ -2405,6 +2555,16 @@ export function resetPolicyLimitTypeFilter() {
   rebuildChart();
 }
 
+export function setAnnualizedMode(enabled) {
+  _cache.filters.annualized = !!enabled;
+  applyFiltersToCache();
+  rebuildChart();
+}
+
+export function getAnnualizedMode() {
+  return !!_cache.filters?.annualized;
+}
+
 export function setEntityFilters({ carriers, carrierGroups } = {}) {
   _cache.filters.carriers = normalizeStringList(carriers);
   _cache.filters.carrierGroups = normalizeStringList(carrierGroups);
@@ -2492,6 +2652,62 @@ export function resetZoomRange() {
   rebuildChart();
 }
 
+function pickPolicyParticipant(raw, datasetLabel) {
+  const parts = Array.isArray(raw?.participants) ? raw.participants : [];
+  if (!parts.length) return null;
+
+  const label = String(datasetLabel || "").trim();
+  if (raw?.isQuotaShare && label) {
+    if (currentView === "carrier") {
+      const match = parts.find((p) => String(p?.carrier || "").trim() === label);
+      if (match) return match;
+    } else if (currentView === "carrierGroup") {
+      const match = parts.find((p) => String(p?.carrierGroup || "").trim() === label);
+      if (match) return match;
+    }
+  }
+
+  return parts
+    .slice()
+    .sort((a, b) => Number(b?.sliceLimit || 0) - Number(a?.sliceLimit || 0))[0] || parts[0];
+}
+
+export function getPolicySelectionFromEvent(evt) {
+  if (!chart || !evt) return null;
+  const hits = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
+  if (!Array.isArray(hits) || !hits.length) return null;
+  const hit = hits[0];
+  const ds = chart.data?.datasets?.[hit.datasetIndex];
+  if (!ds || ds?.datasetId === "sirOverlay") return null;
+  const raw = ds?.data?.[hit.index];
+  if (!raw) return null;
+
+  const participant = pickPolicyParticipant(raw, ds?.label || raw?.group || "");
+  if (!participant) return null;
+
+  const attach = Number(raw?.attach || 0);
+  const top = Number(raw?.top || 0);
+  const limit = Math.max(0, top - attach);
+
+  return {
+    policyId: String(participant?.pid || ""),
+    policyNumber: String(participant?.policy_no || ""),
+    carrier: String(participant?.carrier || ""),
+    carrierGroup: String(participant?.carrierGroup || ""),
+    availability: String(participant?.availability || ""),
+    policyStartMs: Number(participant?.policyStartMs || 0),
+    policyEndMs: Number(participant?.policyEndMs || 0),
+    segmentStartMs: Number(participant?.segmentStartMs || 0),
+    segmentEndMs: Number(participant?.segmentEndMs || 0),
+    attach,
+    limit,
+    top,
+    yearLabel: String(raw?.yearLabel || raw?.x || ""),
+    isQuotaShare: !!raw?.isQuotaShare,
+    view: currentView
+  };
+}
+
 /* ================================
    Main render function
 ================================ */
@@ -2566,6 +2782,8 @@ export async function renderCoverageChart({
       surface: canvas.parentElement
     },
     _wheelBound: _cache._wheelBound || false,
+    hiddenLegendCarriers: _cache.hiddenLegendCarriers || new Set(),
+    hiddenLegendCarrierGroups: _cache.hiddenLegendCarrierGroups || new Set(),
     showCoverageTotals: typeof _cache.showCoverageTotals === "boolean" ? _cache.showCoverageTotals : true,
     filters: {
       startYear: null,
@@ -2577,6 +2795,7 @@ export async function renderCoverageChart({
       sirMode: _cache.filters?.sirMode || "off",
       insuranceProgram: "",
       policyLimitType: "",
+      annualized: !!_cache.filters?.annualized,
       carriers: [],
       carrierGroups: []
     }
@@ -2640,6 +2859,26 @@ export async function renderCoverageChart({
           display: true,
           position: "right",
           align: "start",
+          onClick: (evt, legendItem, legend) => {
+            if (legendItem?._syntheticCarrier) {
+              const value = String(legendItem?.text || "").trim();
+              if (!value) return;
+              const hiddenSet = currentView === "carrier"
+                ? (_cache.hiddenLegendCarriers || (_cache.hiddenLegendCarriers = new Set()))
+                : currentView === "carrierGroup"
+                ? (_cache.hiddenLegendCarrierGroups || (_cache.hiddenLegendCarrierGroups = new Set()))
+                : null;
+              if (!hiddenSet) return;
+              if (hiddenSet.has(value)) hiddenSet.delete(value);
+              else hiddenSet.add(value);
+              rebuildChart();
+              return;
+            }
+            const defaultClick = Chart?.defaults?.plugins?.legend?.onClick;
+            if (typeof defaultClick === "function") {
+              defaultClick(evt, legendItem, legend);
+            }
+          },
           title: {
             display: true,
             text: legendTitleForView(currentView),
@@ -2652,7 +2891,57 @@ export async function renderCoverageChart({
             boxWidth: 9,
             boxHeight: 9,
             padding: 10,
-            font: { size: 11 }
+            font: { size: 11 },
+            filter: (legendItem) => {
+              const isQuota = String(legendItem?.text || "").trim().toLowerCase() === "quota share";
+              if (!isQuota) return true;
+              // Hide quota-share legend item in carrier & carrier-group views
+              // (we render quota by participant colors, but legend should list
+              // concrete carriers/groups instead of a quota bucket).
+              return !(currentView === "carrier" || currentView === "carrierGroup");
+            },
+            generateLabels: (chartInstance) => {
+              const base = Chart.defaults.plugins.legend.labels.generateLabels(chartInstance) || [];
+              const labels = (currentView === "carrier" || currentView === "carrierGroup")
+                ? base.filter((item) => String(item?.text || "").trim().toLowerCase() !== "quota share")
+                : base.slice();
+              if (!(currentView === "carrier" || currentView === "carrierGroup")) return labels;
+
+              const valueKey = currentView === "carrier" ? "carrier" : "carrierGroup";
+              const unknownValue = currentView === "carrier" ? "(unknown carrier)" : "(unknown group)";
+
+              const existing = new Set(
+                labels.map((item) => String(item?.text || "").trim().toLowerCase()).filter(Boolean)
+              );
+              const values = Array.from(
+                new Set(
+                  (_cache.slices || [])
+                    .map((s) => String(s?.[valueKey] || "").trim())
+                    .filter((v) => v && v !== unknownValue)
+                )
+              ).sort((a, b) => a.localeCompare(b));
+
+              for (const value of values) {
+                const key = value.toLowerCase();
+                if (existing.has(key)) continue;
+                const hiddenSet = currentView === "carrier"
+                  ? (_cache.hiddenLegendCarriers || new Set())
+                  : currentView === "carrierGroup"
+                  ? (_cache.hiddenLegendCarrierGroups || new Set())
+                  : new Set();
+                labels.push({
+                  text: value,
+                  fillStyle: colorFromString(value),
+                  strokeStyle: colorFromString(value),
+                  lineWidth: 0,
+                  hidden: hiddenSet.has(value),
+                  datasetIndex: -1,
+                  index: -1,
+                  _syntheticCarrier: true
+                });
+              }
+              return labels;
+            }
           }
         },
         tooltip: {
@@ -2688,23 +2977,50 @@ export async function renderCoverageChart({
               lines.push(`Limit: ${money(lim)}`);
               lines.push(`Top: ${money(top)}`);
               const parts = Array.isArray(r.participants) ? r.participants : [];
-              const startVals = parts
-                .map((p) => Number(p?.policyStartMs || 0))
-                .filter((v) => Number.isFinite(v) && v > 0);
-              const endVals = parts
-                .map((p) => Number(p?.policyEndMs || 0))
-                .filter((v) => Number.isFinite(v) && v > 0);
-              if (startVals.length && endVals.length) {
-                const minStart = Math.min(...startVals);
-                const maxStart = Math.max(...startVals);
-                const minEnd = Math.min(...endVals);
-                const maxEnd = Math.max(...endVals);
-                if (minStart === maxStart && minEnd === maxEnd) {
-                  lines.push(`Policy Start: ${formatFullDateUTC(minStart)}`);
-                  lines.push(`Policy End: ${formatFullDateUTC(maxEnd)}`);
-                } else {
-                  lines.push(`Policy Start (earliest): ${formatFullDateUTC(minStart)}`);
-                  lines.push(`Policy End (latest): ${formatFullDateUTC(maxEnd)}`);
+              if (r.annualized) {
+                const segStartVals = parts
+                  .map((p) => Number(p?.segmentStartMs || p?.policyStartMs || 0))
+                  .filter((v) => Number.isFinite(v) && v > 0);
+                const segEndVals = parts
+                  .map((p) => Number(p?.segmentEndMs || p?.policyEndMs || 0))
+                  .filter((v) => Number.isFinite(v) && v > 0);
+                if (segStartVals.length && segEndVals.length) {
+                  const segStart = Math.min(...segStartVals);
+                  const segEnd = Math.max(...segEndVals);
+                  lines.push(`Policy Start: ${formatFullDateUTC(segStart)}`);
+                  lines.push(`Policy End: ${formatFullDateUTC(segEnd)}`);
+                  const isMultiYear = parts.some((p) => {
+                    const fullStart = Number(p?.policyStartMs || 0);
+                    const fullEnd = Number(p?.policyEndMs || 0);
+                    const pSegStart = Number(p?.segmentStartMs || fullStart || 0);
+                    const pSegEnd = Number(p?.segmentEndMs || fullEnd || 0);
+                    return Number.isFinite(fullStart) &&
+                      Number.isFinite(fullEnd) &&
+                      Number.isFinite(pSegStart) &&
+                      Number.isFinite(pSegEnd) &&
+                      (fullStart < pSegStart || fullEnd > pSegEnd);
+                  });
+                  if (isMultiYear) lines.push("Multi-year policy segment");
+                }
+              } else {
+                const startVals = parts
+                  .map((p) => Number(p?.policyStartMs || 0))
+                  .filter((v) => Number.isFinite(v) && v > 0);
+                const endVals = parts
+                  .map((p) => Number(p?.policyEndMs || 0))
+                  .filter((v) => Number.isFinite(v) && v > 0);
+                if (startVals.length && endVals.length) {
+                  const minStart = Math.min(...startVals);
+                  const maxStart = Math.max(...startVals);
+                  const minEnd = Math.min(...endVals);
+                  const maxEnd = Math.max(...endVals);
+                  if (minStart === maxStart && minEnd === maxEnd) {
+                    lines.push(`Policy Start: ${formatFullDateUTC(minStart)}`);
+                    lines.push(`Policy End: ${formatFullDateUTC(maxEnd)}`);
+                  } else {
+                    lines.push(`Policy Start (earliest): ${formatFullDateUTC(minStart)}`);
+                    lines.push(`Policy End (latest): ${formatFullDateUTC(maxEnd)}`);
+                  }
                 }
               }
               const isPrimaryLayer = Number(attach) <= 0;
@@ -2730,11 +3046,15 @@ export async function renderCoverageChart({
               const quotaParts = r.isQuotaShare && r.quotaGroupKey
                 ? parts.filter((p) => String(p?.quotaGroupKey || "") === String(r.quotaGroupKey))
                 : parts;
+              const hideUnavailable = isUnavailableLegendHidden(ctx?.chart);
+              const shownQuotaParts = hideUnavailable
+                ? quotaParts.filter((p) => !String(p?.availability || "").toLowerCase().includes("unavail"))
+                : quotaParts;
               const isUnavailableGroup = String(r.group || "").toLowerCase() === "unavailable";
-              const shouldShowParts = !!r.isQuotaShare && quotaParts.length > 1;
+              const shouldShowParts = !!r.isQuotaShare && shownQuotaParts.length > 1;
 
-              if (isUnavailableGroup && quotaParts.length) {
-                const uniqueCarriers = [...new Set(quotaParts.map((p) => p.carrier || "(unknown carrier)"))];
+              if (isUnavailableGroup && shownQuotaParts.length) {
+                const uniqueCarriers = [...new Set(shownQuotaParts.map((p) => p.carrier || "(unknown carrier)"))];
                 const carrierLine =
                   uniqueCarriers.length === 1
                     ? `Carrier: ${uniqueCarriers[0]}`
@@ -2742,18 +3062,17 @@ export async function renderCoverageChart({
                 lines.push(carrierLine);
               }
 
-              if (shouldShowParts && quotaParts.length) {
-                lines.push(`Quota share participants (${quotaParts.length}):`);
+              if (shouldShowParts && shownQuotaParts.length) {
+                lines.push(`Quota share participants (${shownQuotaParts.length}):`);
 
-                const show = quotaParts.slice(0, tooltipMaxParticipants);
+                const show = shownQuotaParts.slice(0, tooltipMaxParticipants);
                 for (const p of show) {
                   const carrier = p.carrier || "(unknown carrier)";
-                  const polno = p.policy_no ? ` (${p.policy_no})` : "";
-                  lines.push(`• ${carrier}${polno}: ${money(p.sliceLimit)}`);
+                  lines.push(`• ${carrier}: ${money(p.sliceLimit)}`);
                 }
 
-                if (quotaParts.length > tooltipMaxParticipants) {
-                  lines.push(`… +${quotaParts.length - tooltipMaxParticipants} more`);
+                if (shownQuotaParts.length > tooltipMaxParticipants) {
+                  lines.push(`… +${shownQuotaParts.length - tooltipMaxParticipants} more`);
                 }
               }
 
@@ -2837,6 +3156,7 @@ export async function renderCoverageChart({
   });
 
   bindViewportInteractions();
+  bindResponsiveResizeHandler();
   // Defer width sync so the viewport has final layout dimensions.
   requestAnimationFrame(() => {
     if (!chart) return;

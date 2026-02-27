@@ -14,18 +14,21 @@
       <a class="pageNavTab isActive" href="/Modules/CoverageChart/ExecutiveSummary.html" aria-current="page">
         Executive Summary
       </a>
+      <a class="pageNavTab" href="/Modules/CoverageChart/PolicyInformation.html">
+        Policy Information
+      </a>
+      <div class="themeRow pageNavTheme">
+        <span id="themeLabel" class="themeLabel">Dark mode</span>
+        <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
+          <span class="themeToggleThumb" aria-hidden="true"></span>
+        </button>
+      </div>
     </nav>
 
     <header class="topbar">
       <div class="title">
         <h1>Insurance Program Executive Summary</h1>
         <div class="subtitle">Policyholder-side exposure and concentration analysis for litigation and mediation</div>
-        <div class="themeRow">
-          <span id="themeLabel" class="themeLabel">Dark mode</span>
-          <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
-            <span class="themeToggleThumb" aria-hidden="true"></span>
-          </button>
-        </div>
       </div>
 
       <div class="controls">
@@ -122,6 +125,13 @@
               <select id="policyLimitTypeSelect"></select>
             </div>
           </div>
+
+          <div class="controlPanel">
+            <div class="controlBlock">
+              <label for="annualizeToggleBtn">Annualization</label>
+              <button id="annualizeToggleBtn" class="exportBtn" type="button" aria-pressed="false">Annualized: Off</button>
+            </div>
+          </div>
         </div>
       </div>
     </header>
@@ -134,11 +144,11 @@
             <div id="execKpiGross" class="kpiValue">$0</div>
           </article>
           <article class="kpiCard">
-            <div class="kpiLabel">Total Collectible Limits</div>
+            <div class="kpiLabel">Total Available Limits</div>
             <div id="execKpiCollectible" class="kpiValue">$0</div>
           </article>
           <article class="kpiCard">
-            <div class="kpiLabel">% Collectible</div>
+            <div class="kpiLabel">% Available</div>
             <div id="execKpiCollectiblePct" class="kpiValue">0%</div>
           </article>
           <article class="kpiCard">
@@ -178,11 +188,7 @@
           <div id="availableCoverageBadge" class="coverageBadge">
             Total Available Coverage: $0
           </div>
-          <button id="toggleCoverageBadgeBtn" class="exportBtn" type="button" aria-pressed="true">
-            Hide Total Avaiable Limits
-          </button>
         </div>
-        <div id="yearTotalsStrip" class="yearTotalsStrip"></div>
         <div class="chartViewport">
           <div class="chartSurface">
             <canvas id="coverageCanvas"></canvas>
@@ -215,7 +221,8 @@
       resetZoomRange,
       getFilteredSlices,
       setCoverageTotalsVisible,
-      getYearLabelAnchors
+      getYearLabelAnchors,
+      setAnnualizedMode
     } from "/Modules/CoverageChart/CoverageChart.js";
 
     let execCarrierGroupChart = null;
@@ -449,7 +456,7 @@
             },
             {
               type: "line",
-              label: "Collectible Limits",
+              label: "Available Limits",
               data: collectible,
               borderColor: theme.line,
               pointBackgroundColor: theme.line,
@@ -477,6 +484,7 @@
       try {
         const THEME_STORAGE_KEY = "coverageChartTheme";
         const COVERAGE_BADGE_STORAGE_KEY = "coverageChartShowAvailableTotal";
+        const ANNUALIZED_STORAGE_KEY = "coverageChartAnnualizedMode";
         const getPreferredTheme = () => {
           const stored = localStorage.getItem(THEME_STORAGE_KEY);
           if (stored === "light" || stored === "dark") return stored;
@@ -487,6 +495,12 @@
           if (stored === "0") return false;
           if (stored === "1") return true;
           return true;
+        };
+        const getAnnualizedPref = () => {
+          const stored = localStorage.getItem(ANNUALIZED_STORAGE_KEY);
+          if (stored === "1") return true;
+          if (stored === "0") return false;
+          return false;
         };
         const applyThemeToPage = (theme) => {
           document.documentElement.dataset.theme = theme;
@@ -530,18 +544,53 @@
         const exportPdfBtn = document.getElementById("exportPdfBtn");
         const availableCoverageBadge = document.getElementById("availableCoverageBadge");
         const toggleCoverageBadgeBtn = document.getElementById("toggleCoverageBadgeBtn");
-        let showCoverageBadge = getShowCoverageBadgePref();
+        const annualizeToggleBtn = document.getElementById("annualizeToggleBtn");
+        let showCoverageBadge = true;
+        let annualizedMode = getAnnualizedPref();
         setCoverageTotalsVisible(showCoverageBadge);
+        setAnnualizedMode(annualizedMode);
+        const syncAnnualizeToggleUI = () => {
+          annualizeToggleBtn.textContent = annualizedMode ? "Annualized: On" : "Annualized: Off";
+          annualizeToggleBtn.setAttribute("aria-pressed", String(annualizedMode));
+        };
+        syncAnnualizeToggleUI();
 
-        const computeAvailableCoverage = (slices, carriers, carrierGroups) => {
+        const coverageLayerKey = (slice) => [
+          String(slice?.PolicyLimitID || ""),
+          String(slice?.PolicyID || ""),
+          Number(slice?.attach || 0),
+          Number(slice?.sliceLimit || 0),
+          String(slice?.policyLimitTypeId || slice?.policyLimitType || ""),
+          Number(slice?.policyStartMs || 0),
+          Number(slice?.policyEndMs || 0)
+        ].join("||");
+
+        const computeAvailableCoverage = (slices, carriers, carrierGroups, annualized) => {
           const carrierSet = new Set(carriers);
           const groupSet = new Set(carrierGroups);
-          return (slices || []).reduce((sum, s) => {
-            if (carrierSet.size > 0 && !carrierSet.has(String(s?.carrier || ""))) return sum;
-            if (groupSet.size > 0 && !groupSet.has(String(s?.carrierGroup || ""))) return sum;
+          const rows = slices || [];
+          if (annualized) {
+            return rows.reduce((sum, s) => {
+              if (carrierSet.size > 0 && !carrierSet.has(String(s?.carrier || ""))) return sum;
+              if (groupSet.size > 0 && !groupSet.has(String(s?.carrierGroup || ""))) return sum;
+              const unavailable = String(s?.availability || "").toLowerCase().includes("unavail");
+              return sum + (unavailable ? 0 : Number(s?.sliceLimit || 0));
+            }, 0);
+          }
+
+          const seen = new Set();
+          let total = 0;
+          for (const s of rows) {
+            if (carrierSet.size > 0 && !carrierSet.has(String(s?.carrier || ""))) continue;
+            if (groupSet.size > 0 && !groupSet.has(String(s?.carrierGroup || ""))) continue;
             const unavailable = String(s?.availability || "").toLowerCase().includes("unavail");
-            return sum + (unavailable ? 0 : Number(s?.sliceLimit || 0));
-          }, 0);
+            if (unavailable) continue;
+            const key = coverageLayerKey(s);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            total += Number(s?.sliceLimit || 0);
+          }
+          return total;
         };
         const computeAvailableCoverageByYear = (slices, carriers, carrierGroups) => {
           const carrierSet = new Set(carriers);
@@ -599,27 +648,37 @@
           const yearTotals = computeAvailableCoverageByYear(getFilteredSlices(), carriers, carrierGroups);
           const totalsByYear = new Map(yearTotals.map((t) => [String(t.year), Number(t.total || 0)]));
           const anchors = getYearLabelAnchors();
-          const totalAvailable = computeAvailableCoverage(getFilteredSlices(), carriers, carrierGroups);
+          const totalAvailable = computeAvailableCoverage(
+            getFilteredSlices(),
+            carriers,
+            carrierGroups,
+            annualizedMode
+          );
           availableCoverageBadge.textContent = `Total Available Coverage: ${money(totalAvailable)}`;
           availableCoverageBadge.hidden = !showCoverageBadge;
-          yearTotalsStrip.hidden = !showCoverageBadge;
-          const surfaceW = Math.max(chartSurface?.clientWidth || 0, 240);
-          yearTotalsStrip.innerHTML = `<div class="yearTotalsSurface" style="width:${surfaceW}px;">` +
-            `<span class="yearTotalsLabel">Available Limits:</span>` +
-            anchors
-              .map((a) => {
-                const total = totalsByYear.get(String(a.x)) || 0;
-                return `<span class="yearTotalValue" style="left:${a.px}px;">${formatTenthMillion(total)}</span>`;
-              })
-              .join("") +
-            `</div>`;
-          if (chartViewport) yearTotalsStrip.scrollLeft = chartViewport.scrollLeft;
-          toggleCoverageBadgeBtn.textContent = showCoverageBadge ? "Hide Total Avaiable Limits" : "Show Total Avaiable Limits";
-          toggleCoverageBadgeBtn.setAttribute("aria-pressed", String(showCoverageBadge));
+          if (yearTotalsStrip) {
+            yearTotalsStrip.hidden = !showCoverageBadge;
+            const surfaceW = Math.max(chartSurface?.clientWidth || 0, 240);
+            yearTotalsStrip.innerHTML = `<div class="yearTotalsSurface" style="width:${surfaceW}px;">` +
+              `<span class="yearTotalsLabel">Available Limits:</span>` +
+              anchors
+                .map((a) => {
+                  const total = totalsByYear.get(String(a.x)) || 0;
+                  return `<span class="yearTotalValue" style="left:${a.px}px;">${formatTenthMillion(total)}</span>`;
+                })
+                .join("") +
+              `</div>`;
+            if (chartViewport) yearTotalsStrip.scrollLeft = chartViewport.scrollLeft;
+          }
+          if (toggleCoverageBadgeBtn) {
+            toggleCoverageBadgeBtn.textContent = showCoverageBadge ? "Hide Total Avaiable Limits" : "Show Total Avaiable Limits";
+            toggleCoverageBadgeBtn.setAttribute("aria-pressed", String(showCoverageBadge));
+          }
 
           activeFilterSummary.textContent =
             `Program: ${insuranceProgramSelect.value || "(none)"} | ` +
             `Policy Limit Type: ${policyLimitTypeSelect.value || "(none)"} | ` +
+            `Annualized: ${annualizedMode ? "On" : "Off"} | ` +
             `Years: ${yearsText} | ` +
             `Carriers: ${summarizeSelection(carriers, "carrier")} | ` +
             `Carrier Groups: ${summarizeSelection(carrierGroups, "group")}`;
@@ -849,15 +908,24 @@
         zoomMaxInput.addEventListener("change", applyZoomFilters);
         carrierDropdownMenu.addEventListener("change", () => applyEntityFilters("carrier"));
         carrierGroupDropdownMenu.addEventListener("change", () => applyEntityFilters("carrierGroup"));
-        if (chartViewport) {
+        if (chartViewport && yearTotalsStrip) {
           chartViewport.addEventListener("scroll", () => {
             yearTotalsStrip.scrollLeft = chartViewport.scrollLeft;
           });
         }
-        toggleCoverageBadgeBtn.addEventListener("click", () => {
-          showCoverageBadge = !showCoverageBadge;
-          localStorage.setItem(COVERAGE_BADGE_STORAGE_KEY, showCoverageBadge ? "1" : "0");
-          setCoverageTotalsVisible(showCoverageBadge);
+        if (toggleCoverageBadgeBtn) {
+          toggleCoverageBadgeBtn.addEventListener("click", () => {
+            showCoverageBadge = !showCoverageBadge;
+            localStorage.setItem(COVERAGE_BADGE_STORAGE_KEY, showCoverageBadge ? "1" : "0");
+            setCoverageTotalsVisible(showCoverageBadge);
+            updateFilterSummary();
+          });
+        }
+        annualizeToggleBtn.addEventListener("click", () => {
+          annualizedMode = !annualizedMode;
+          localStorage.setItem(ANNUALIZED_STORAGE_KEY, annualizedMode ? "1" : "0");
+          setAnnualizedMode(annualizedMode);
+          syncAnnualizeToggleUI();
           updateFilterSummary();
         });
 
@@ -894,6 +962,10 @@
           showCoverageBadge = true;
           localStorage.setItem(COVERAGE_BADGE_STORAGE_KEY, "1");
           setCoverageTotalsVisible(true);
+          annualizedMode = false;
+          localStorage.setItem(ANNUALIZED_STORAGE_KEY, "0");
+          setAnnualizedMode(false);
+          syncAnnualizeToggleUI();
           updateFilterSummary();
         });
 

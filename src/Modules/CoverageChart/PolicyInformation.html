@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Policy Information</title>
+  <link rel="stylesheet" href="/Modules/CoverageChart/CoverageChart.css" />
+</head>
+<body>
+  <div class="page">
+    <nav class="pageNav" aria-label="Dashboard Navigation">
+      <a class="pageNavTab" href="/Modules/CoverageChart/CoverageChartDemo.html">Coverage Chart</a>
+      <a class="pageNavTab" href="/Modules/CoverageChart/ExecutiveSummary.html">Executive Summary</a>
+      <a class="pageNavTab isActive" href="/Modules/CoverageChart/PolicyInformation.html" aria-current="page">
+        Policy Information
+      </a>
+      <div class="themeRow pageNavTheme">
+        <span id="themeLabel" class="themeLabel">Dark mode</span>
+        <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
+          <span class="themeToggleThumb" aria-hidden="true"></span>
+        </button>
+      </div>
+    </nav>
+
+    <header class="topbar">
+      <div class="title">
+        <h1>Policy Information</h1>
+        <div class="subtitle">Placeholder policy terms and conditions view (separate from Executive Summary)</div>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="policyInfoGrid" aria-label="Policy Information Placeholders">
+        <article class="policyInfoCard policyInfoCard--full">
+          <h2 class="policyInfoTitle">Policy Overview</h2>
+          <div class="policyInfoMeta">
+            <div><strong>Program:</strong> ABC Company</div>
+            <div><strong>Policy Number:</strong> Placeholder-0001</div>
+            <div><strong>Policy Period:</strong> January 1, 1985 - December 31, 1986</div>
+            <div><strong>Status:</strong> Placeholder</div>
+          </div>
+          <p class="policyInfoText">
+            This section will hold per-policy summary details once full policy text/data is available.
+          </p>
+        </article>
+
+        <article class="policyInfoCard">
+          <h2 class="policyInfoTitle">Terms</h2>
+          <ul class="policyInfoList">
+            <li>Coverage trigger language placeholder</li>
+            <li>Notice requirements placeholder</li>
+            <li>Defense obligations placeholder</li>
+          </ul>
+        </article>
+
+        <article class="policyInfoCard">
+          <h2 class="policyInfoTitle">Conditions</h2>
+          <ul class="policyInfoList">
+            <li>Cooperation clause placeholder</li>
+            <li>Consent-to-settle placeholder</li>
+            <li>Other insurance condition placeholder</li>
+          </ul>
+        </article>
+
+        <article class="policyInfoCard">
+          <h2 class="policyInfoTitle">Exclusions</h2>
+          <ul class="policyInfoList">
+            <li>Known loss exclusion placeholder</li>
+            <li>Contractual liability exclusion placeholder</li>
+            <li>Intentional acts exclusion placeholder</li>
+          </ul>
+        </article>
+
+        <article class="policyInfoCard">
+          <h2 class="policyInfoTitle">Endorsements</h2>
+          <ul class="policyInfoList">
+            <li>Follow-form endorsement placeholder</li>
+            <li>Occurrence definition endorsement placeholder</li>
+            <li>Batch clause endorsement placeholder</li>
+          </ul>
+        </article>
+
+        <article class="policyInfoCard policyInfoCard--full">
+          <h2 class="policyInfoTitle">Future Data Sections</h2>
+          <div class="policyInfoPills">
+            <span class="policyPill">Policy Wording</span>
+            <span class="policyPill">Broker Manuscript Terms</span>
+            <span class="policyPill">Claims-Made Reporting Windows</span>
+            <span class="policyPill">Choice of Law / Venue</span>
+            <span class="policyPill">Allocation / Exhaustion Language</span>
+            <span class="policyPill">Custom Endorsement Notes</span>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    const THEME_STORAGE_KEY = "coverageChartTheme";
+    const themeLabel = document.getElementById("themeLabel");
+    const themeToggleBtn = document.getElementById("themeToggleBtn");
+
+    const getPreferredTheme = () => {
+      const stored = localStorage.getItem(THEME_STORAGE_KEY);
+      if (stored === "light" || stored === "dark") return stored;
+      return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    };
+
+    const applyThemeToPage = (theme) => {
+      document.documentElement.dataset.theme = theme;
+      const isLight = theme === "light";
+      themeToggleBtn.classList.toggle("isLight", isLight);
+      themeToggleBtn.setAttribute("aria-pressed", String(isLight));
+      themeLabel.textContent = isLight ? "Light mode" : "Dark mode";
+    };
+
+    applyThemeToPage(getPreferredTheme());
+
+    themeToggleBtn.addEventListener("click", () => {
+      const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+      const next = current === "light" ? "dark" : "light";
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+      applyThemeToPage(next);
+    });
+  </script>
+</body>
+</html>
