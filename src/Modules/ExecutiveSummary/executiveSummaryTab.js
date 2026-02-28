@@ -318,15 +318,11 @@
         : `<li>(none)</li>`;
 
       const facts = [
-        `<li>Program span: ${spanStart}-${spanEnd}</li>`,
-        `<li>Gross limits: ${money(metrics.gross)}</li>`,
-        `<li>Available limits: ${money(metrics.available)}</li>`,
-        `<li>Largest carrier group share of gross: ${(metrics.largestGroupPct * 100).toFixed(1)}% (${metrics.largestGroupName})</li>`,
+        `<li>Largest carrier group: ${metrics.largestGroupName}</li>`,
         `<li>
-          Top 3 carrier groups share of gross: ${(metrics.top3Pct * 100).toFixed(1)}%
+          Top 3 carrier groups composition:
           <ul class="execFactsSubList">${topGroupSubBullets}</ul>
-        </li>`,
-        `<li>Policies included: ${metrics.uniquePolicies.toLocaleString()}</li>`
+        </li>`
       ];
       factsEl.innerHTML = facts.join("");
       document.getElementById("execCoverageSpan").textContent = `Coverage Span: ${spanStart}-${spanEnd}`;
