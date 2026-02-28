@@ -1,4 +1,4 @@
-// Modules/CoverageChart/CoverageChart.js
+// Modules/CoverageChart/coverageChartEngine.js
 // Floating "coverage tower" renderer with 3 Views:
 //   - carrier
 //   - carrierGroup
@@ -1569,8 +1569,10 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
             pid: src?.PolicyID,
             carrier: src?.carrier,
             carrierGroup: src?.carrierGroup,
+            insuranceProgram: src?.insuranceProgram,
             availability: src?.availability,
             policy_no: src?.policy_no,
+            policyLimitType: String(src?.policyLimitType || src?.policyLimitTypeId || ""),
             policyStartMs: Number(src?.policyStartMs || 0),
             policyEndMs: Number(src?.policyEndMs || 0),
             segmentStartMs: Number(src?.yearOverlapStartMs || src?.policyStartMs || 0),
@@ -1764,8 +1766,10 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
         pid: s.PolicyID,
         carrier: s.carrier,
         carrierGroup: s.carrierGroup,
+        insuranceProgram: s.insuranceProgram,
         availability: s.availability,
         policy_no: s.policy_no,
+        policyLimitType: String(s?.policyLimitType || s?.policyLimitTypeId || ""),
         policyStartMs: Number(s.policyStartMs || 0),
         policyEndMs: Number(s.policyEndMs || 0),
         sliceLimit: Number(s?.sliceLimit || 0),
@@ -2154,17 +2158,26 @@ function getFilterMeta() {
   const f = _cache.filters || {};
   const yearRange =
     f.startDate || f.endDate
-      ? `${String(f.startDate || "All")}-${String(f.endDate || "All")}`
+      ? `${String(f.startDate || "All")} to ${String(f.endDate || "All")}`
       : Number.isFinite(f.startYear) || Number.isFinite(f.endYear)
-      ? `${Number.isFinite(f.startYear) ? f.startYear : "All"}-${Number.isFinite(f.endYear) ? f.endYear : "All"}`
+      ? `${Number.isFinite(f.startYear) ? f.startYear : "All"} to ${Number.isFinite(f.endYear) ? f.endYear : "All"}`
       : "All";
   const carriers = normalizeStringList(f.carriers);
   const carrierGroups = normalizeStringList(f.carrierGroups);
+  const summarizeList = (list, allLabel) => {
+    if (!list.length) return allLabel;
+    if (list.length <= 6) return list.join(", ");
+    return `${list.slice(0, 6).join(", ")} +${list.length - 6} more`;
+  };
   const viewLabel = currentView === "carrierGroup"
     ? "Carrier Group"
     : currentView === "availability"
       ? "Availability"
       : "Carrier";
+  const zoomRange =
+    Number.isFinite(f.zoomMin) || Number.isFinite(f.zoomMax)
+      ? `${Number.isFinite(f.zoomMin) ? money(f.zoomMin) : "Auto"} to ${Number.isFinite(f.zoomMax) ? money(f.zoomMax) : "Auto"}`
+      : "Auto";
 
   return {
     viewLabel,
@@ -2172,15 +2185,20 @@ function getFilterMeta() {
     insuranceProgram: String(f.insuranceProgram || "").trim() || "All",
     policyLimitType: String(f.policyLimitType || "").trim() || "All",
     yearRange,
-    carriers: carriers.length ? carriers.join(", ") : "All",
-    carrierGroups: carrierGroups.length ? carrierGroups.join(", ") : "All"
+    annualized: f.annualized ? "On" : "Off",
+    zoomRange,
+    carriers: summarizeList(carriers, "All"),
+    carrierGroups: summarizeList(carrierGroups, "All")
   };
 }
 
 function getExportFilterLines(meta = getFilterMeta()) {
   return [
-    `View: ${meta.viewLabel} | Insurance Program: ${meta.insuranceProgram} | Policy Limit Type: ${meta.policyLimitType}`,
-    `Year Range: ${meta.yearRange} | Carriers: ${meta.carriers} | Carrier Groups: ${meta.carrierGroups}`
+    `View: ${meta.viewLabel} | Annualized: ${meta.annualized} | Zoom Range: ${meta.zoomRange}`,
+    `Insurance Program: ${meta.insuranceProgram} | Policy Limit Type: ${meta.policyLimitType}`,
+    `Period: ${meta.yearRange}`,
+    `Carriers: ${meta.carriers}`,
+    `Carrier Groups: ${meta.carrierGroups}`
   ];
 }
 
@@ -2230,6 +2248,154 @@ function getAggregatedReportRows() {
   return rows;
 }
 
+function normalizeAvailabilityLabel(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "Available";
+  if (/unavail/i.test(s)) return "Unavailable";
+  if (/partial/i.test(s)) return "Partially Available";
+  return s;
+}
+
+function getCoverageReportFacts() {
+  const rows = getFilteredSliceRows();
+  const policySet = new Set();
+  const policyNumberSet = new Set();
+  const carrierSet = new Set();
+  const carrierGroupSet = new Set();
+  const programSet = new Set();
+  const yearMap = new Map();
+  const carrierMap = new Map();
+  const availabilityMap = new Map();
+  const programMap = new Map();
+  const limitTypeMap = new Map();
+
+  let totalLayer = 0;
+  let availableLayer = 0;
+  let unavailableLayer = 0;
+  let minAttachment = Number.POSITIVE_INFINITY;
+  let maxAttachment = Number.NEGATIVE_INFINITY;
+  let minLayer = Number.POSITIVE_INFINITY;
+  let maxLayer = Number.NEGATIVE_INFINITY;
+
+  for (const row of rows) {
+    const policyKey = String(row.PolicyID || row.PolicyNumber || "").trim();
+    if (policyKey) policySet.add(policyKey);
+    const policyNumber = String(row.PolicyNumber || "").trim();
+    if (policyNumber) policyNumberSet.add(policyNumber);
+
+    const carrier = String(row.Carrier || "").trim() || "(unknown carrier)";
+    const carrierGroup = String(row.CarrierGroup || "").trim() || "(unknown group)";
+    const program = String(row.InsuranceProgram || "").trim() || "(unknown program)";
+    const limitType = String(row.PolicyLimitType || "").trim() || "(unknown type)";
+    carrierSet.add(carrier);
+    carrierGroupSet.add(carrierGroup);
+    programSet.add(program);
+
+    const layer = Number(row.LayerLimit || 0);
+    const attach = Number(row.Attachment || 0);
+    totalLayer += layer;
+    if (Number.isFinite(attach)) {
+      minAttachment = Math.min(minAttachment, attach);
+      maxAttachment = Math.max(maxAttachment, attach);
+    }
+    if (Number.isFinite(layer)) {
+      minLayer = Math.min(minLayer, layer);
+      maxLayer = Math.max(maxLayer, layer);
+    }
+
+    const availability = normalizeAvailabilityLabel(row.Availability);
+    availabilityMap.set(availability, (availabilityMap.get(availability) || 0) + 1);
+    if (/unavail/i.test(availability)) unavailableLayer += layer;
+    else availableLayer += layer;
+
+    const year = String(row.Year || "Unknown");
+    if (!yearMap.has(year)) yearMap.set(year, { year, rows: 0, layer: 0, available: 0 });
+    const yearAgg = yearMap.get(year);
+    yearAgg.rows += 1;
+    yearAgg.layer += layer;
+    if (!/unavail/i.test(availability)) yearAgg.available += layer;
+
+    if (!carrierMap.has(carrier)) carrierMap.set(carrier, { carrier, rows: 0, policies: new Set(), layer: 0, available: 0 });
+    const carrierAgg = carrierMap.get(carrier);
+    carrierAgg.rows += 1;
+    carrierAgg.layer += layer;
+    if (!/unavail/i.test(availability)) carrierAgg.available += layer;
+    if (policyKey) carrierAgg.policies.add(policyKey);
+
+    if (!programMap.has(program)) programMap.set(program, { program, rows: 0, policies: new Set(), layer: 0 });
+    const programAgg = programMap.get(program);
+    programAgg.rows += 1;
+    programAgg.layer += layer;
+    if (policyKey) programAgg.policies.add(policyKey);
+
+    if (!limitTypeMap.has(limitType)) limitTypeMap.set(limitType, { limitType, rows: 0, policies: new Set(), layer: 0 });
+    const limitTypeAgg = limitTypeMap.get(limitType);
+    limitTypeAgg.rows += 1;
+    limitTypeAgg.layer += layer;
+    if (policyKey) limitTypeAgg.policies.add(policyKey);
+  }
+
+  const yearRows = Array.from(yearMap.values()).sort((a, b) => {
+    const ay = Number(a.year);
+    const by = Number(b.year);
+    if (Number.isFinite(ay) && Number.isFinite(by)) return ay - by;
+    return String(a.year).localeCompare(String(b.year));
+  });
+
+  const carrierRows = Array.from(carrierMap.values())
+    .map((row) => ({
+      carrier: row.carrier,
+      rows: row.rows,
+      policyCount: row.policies.size,
+      layer: row.layer,
+      available: row.available
+    }))
+    .sort((a, b) => b.layer - a.layer || a.carrier.localeCompare(b.carrier));
+
+  const programRows = Array.from(programMap.values())
+    .map((row) => ({
+      program: row.program,
+      rows: row.rows,
+      policyCount: row.policies.size,
+      layer: row.layer
+    }))
+    .sort((a, b) => b.layer - a.layer || a.program.localeCompare(b.program));
+
+  const limitTypeRows = Array.from(limitTypeMap.values())
+    .map((row) => ({
+      limitType: row.limitType,
+      rows: row.rows,
+      policyCount: row.policies.size,
+      layer: row.layer
+    }))
+    .sort((a, b) => b.layer - a.layer || a.limitType.localeCompare(b.limitType));
+
+  const availabilityRows = Array.from(availabilityMap.entries())
+    .map(([availability, count]) => ({ availability, count }))
+    .sort((a, b) => b.count - a.count || a.availability.localeCompare(b.availability));
+
+  return {
+    rowsCount: rows.length,
+    uniquePolicies: policySet.size,
+    uniquePolicyNumbers: policyNumberSet.size,
+    uniqueCarriers: carrierSet.size,
+    uniqueCarrierGroups: carrierGroupSet.size,
+    uniquePrograms: programSet.size,
+    totalLayer,
+    availableLayer,
+    unavailableLayer,
+    minAttachment: Number.isFinite(minAttachment) ? minAttachment : null,
+    maxAttachment: Number.isFinite(maxAttachment) ? maxAttachment : null,
+    minLayer: Number.isFinite(minLayer) ? minLayer : null,
+    maxLayer: Number.isFinite(maxLayer) ? maxLayer : null,
+    yearRows,
+    carrierRows,
+    programRows,
+    limitTypeRows,
+    availabilityRows
+  };
+}
+
 /**
  * Export chart canvas as PNG using the current filtered/rendered state.
  */
@@ -2252,7 +2418,7 @@ export function exportChartAsPNG() {
   const topPad = Math.round(20 * scale);
   const lineGap = Math.round(8 * scale);
   const metaLines = getExportFilterLines(meta);
-  const headerHeight = Math.round(topPad + titleSize + 2 * (textSize + lineGap) + 20 * scale);
+  const headerHeight = Math.round(topPad + titleSize + Math.max(1, metaLines.length) * (textSize + lineGap) + 20 * scale);
   const outCanvas = document.createElement("canvas");
   outCanvas.width = width;
   outCanvas.height = headerHeight + srcCanvas.height;
@@ -2271,10 +2437,10 @@ export function exportChartAsPNG() {
 
   ctx.fillStyle = subFg;
   ctx.font = `500 ${textSize}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
-  y += lineGap + textSize;
-  ctx.fillText(metaLines[0], sidePad, y);
-  y += lineGap + textSize;
-  ctx.fillText(metaLines[1], sidePad, y);
+  for (const line of metaLines) {
+    y += lineGap + textSize;
+    ctx.fillText(line, sidePad, y);
+  }
 
   const dataUrl = outCanvas.toDataURL("image/png", 1);
   triggerDownload(dataUrl, file);
@@ -2306,9 +2472,9 @@ export function exportFilteredCSV() {
 }
 
 /**
- * Export a 2-page PDF report:
- * page 1 = metadata + chart image
- * page 2+ = aggregated layer table
+ * Export a multi-page PDF report:
+ * page 1 = report scope + key metrics + chart image
+ * page 2+ = totals and filtered schedule tables
  */
 export async function exportReportPDF() {
   if (!chart || !_cache.dom?.canvas) throw new Error("Chart is not initialized");
@@ -2318,6 +2484,9 @@ export async function exportReportPDF() {
   const jsPDF = window.jspdf.jsPDF;
 
   const meta = getFilterMeta();
+  const facts = getCoverageReportFacts();
+  const filteredRows = getFilteredSliceRows();
+  const aggregatedRows = getAggregatedReportRows();
   const stamp = toDateStamp();
   const filename = `CoverageTower_Report_${stamp}.pdf`;
 
@@ -2332,24 +2501,173 @@ export async function exportReportPDF() {
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
   const margin = 36;
+  const bottomPad = 24;
 
-  // Page 1: summary + image
+  const ensureSpace = (state, needed = 18) => {
+    if (state.y + needed <= pageH - margin - bottomPad) return false;
+    pdf.addPage("a4", "landscape");
+    state.y = margin;
+    return true;
+  };
+
+  const addSectionTitle = (state, title) => {
+    ensureSpace(state, 18);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(13);
+    pdf.setTextColor(22, 34, 54);
+    pdf.text(title, margin, state.y);
+    state.y += 15;
+  };
+
+  const drawWrappedFactLine = (state, label, value) => {
+    const full = `${label}: ${value}`;
+    const lines = pdf.splitTextToSize(full, pageW - margin * 2);
+    for (const line of lines) {
+      ensureSpace(state, 12);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9.5);
+      pdf.setTextColor(38, 52, 72);
+      pdf.text(line, margin, state.y);
+      state.y += 11;
+    }
+  };
+
+  const drawGridTable = ({ state, title, columns, rows, rowToCells }) => {
+    const tableW = columns.reduce((sum, col) => sum + col.width, 0);
+    addSectionTitle(state, title);
+
+    const drawHeader = () => {
+      ensureSpace(state, 18);
+      const top = state.y;
+      let x = margin;
+      pdf.setFillColor(231, 237, 247);
+      pdf.setDrawColor(188, 198, 214);
+      pdf.setLineWidth(0.4);
+      pdf.rect(margin, top, tableW, 16, "FD");
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8.5);
+      pdf.setTextColor(30, 40, 58);
+      for (const col of columns) {
+        if (col.align === "right") {
+          pdf.text(col.label, x + col.width - 3, top + 11, { align: "right" });
+        } else {
+          pdf.text(col.label, x + 3, top + 11);
+        }
+        x += col.width;
+        if (x < margin + tableW) pdf.line(x, top, x, top + 16);
+      }
+      state.y += 16;
+    };
+
+    drawHeader();
+
+    if (!rows.length) {
+      ensureSpace(state, 16);
+      pdf.setFont("helvetica", "italic");
+      pdf.setFontSize(9);
+      pdf.setTextColor(72, 84, 102);
+      pdf.text("No rows for current filters.", margin + 3, state.y + 11);
+      state.y += 18;
+      return;
+    }
+
+    for (const row of rows) {
+      if (ensureSpace(state, 16)) drawHeader();
+      const top = state.y;
+      let x = margin;
+      const cells = rowToCells(row);
+      pdf.setDrawColor(210, 219, 230);
+      pdf.setLineWidth(0.3);
+      pdf.rect(margin, top, tableW, 16);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8.3);
+      pdf.setTextColor(36, 50, 70);
+      for (let i = 0; i < columns.length; i++) {
+        const col = columns[i];
+        const clipped = pdf.splitTextToSize(String(cells[i] ?? ""), col.width - 6)[0] || "";
+        if (col.align === "right") {
+          pdf.text(clipped, x + col.width - 3, top + 11, { align: "right" });
+        } else {
+          pdf.text(clipped, x + 3, top + 11);
+        }
+        x += col.width;
+        if (x < margin + tableW) pdf.line(x, top, x, top + 16);
+      }
+      state.y += 16;
+    }
+
+    state.y += 8;
+  };
+
+  // Page 1: report scope + key metrics + chart
+  let pageState = { y: margin };
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(18);
-  pdf.text("Insurance Program Coverage Tower", margin, 42);
+  pdf.setTextColor(20, 32, 52);
+  pdf.text("Insurance Program Coverage Tower Report", margin, pageState.y);
+  pageState.y += 18;
 
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(10);
-  const subtitle = getExportFilterLines(meta).join("    ");
-  const subtitleLines = pdf.splitTextToSize(subtitle, pageW - margin * 2);
-  pdf.text(subtitleLines, margin, 62);
+  pdf.setTextColor(60, 74, 96);
+  pdf.text(`Generated: ${new Date().toLocaleString()}`, margin, pageState.y);
+  pageState.y += 14;
 
-  const generated = `Generated: ${new Date().toLocaleString()}`;
-  pdf.text(generated, margin, 78 + (subtitleLines.length - 1) * 12);
+  addSectionTitle(pageState, "Report Scope");
+  for (const line of getExportFilterLines(meta)) {
+    const wrapped = pdf.splitTextToSize(line, pageW - margin * 2);
+    for (const subLine of wrapped) {
+      ensureSpace(pageState, 12);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9.5);
+      pdf.setTextColor(38, 52, 72);
+      pdf.text(subLine, margin, pageState.y);
+      pageState.y += 11;
+    }
+  }
+  pageState.y += 3;
 
-  const imgTop = 98 + (subtitleLines.length - 1) * 12;
+  const numericYears = facts.yearRows
+    .map((row) => Number(row.year))
+    .filter((year) => Number.isFinite(year));
+  const yearSpan = numericYears.length
+    ? `${Math.min(...numericYears)} to ${Math.max(...numericYears)}`
+    : "N/A";
+  const availabilitySummary = facts.availabilityRows.length
+    ? facts.availabilityRows.map((row) => `${row.availability}: ${row.count}`).join(", ")
+    : "N/A";
+  const metricLines = [
+    ["Filtered Slice Rows", String(facts.rowsCount)],
+    ["Unique Policies", String(facts.uniquePolicies)],
+    ["Distinct Policy Numbers", String(facts.uniquePolicyNumbers)],
+    ["Unique Carriers", String(facts.uniqueCarriers)],
+    ["Unique Carrier Groups", String(facts.uniqueCarrierGroups)],
+    ["Unique Programs", String(facts.uniquePrograms)],
+    ["Policy Year Span", yearSpan],
+    ["Total Layer Limit", money(facts.totalLayer)],
+    ["Available Layer Limit", money(facts.availableLayer)],
+    ["Unavailable Layer Limit", money(facts.unavailableLayer)],
+    [
+      "Attachment Range",
+      facts.minAttachment === null ? "N/A" : `${money(facts.minAttachment)} to ${money(facts.maxAttachment)}`
+    ],
+    [
+      "Layer Range",
+      facts.minLayer === null ? "N/A" : `${money(facts.minLayer)} to ${money(facts.maxLayer)}`
+    ],
+    ["Availability Buckets", availabilitySummary]
+  ];
+  addSectionTitle(pageState, "Key Facts");
+  for (const [label, value] of metricLines) drawWrappedFactLine(pageState, label, value);
+
+  if (pageState.y > pageH - margin - 160) {
+    pdf.addPage("a4", "landscape");
+    pageState = { y: margin };
+  }
+  addSectionTitle(pageState, "Chart Snapshot");
+  const imgTop = pageState.y;
   const imgMaxW = pageW - margin * 2;
-  const imgMaxH = pageH - imgTop - 50;
+  const imgMaxH = Math.max(120, pageH - imgTop - 40);
   const imgRatio = renderCanvas.width / renderCanvas.height || 1;
   let imgW = imgMaxW;
   let imgH = imgW / imgRatio;
@@ -2359,66 +2677,160 @@ export async function exportReportPDF() {
   }
   pdf.addImage(chartImg, "PNG", margin, imgTop, imgW, imgH, undefined, "FAST");
 
-  pdf.setFontSize(9);
-  pdf.text("Generated by Coverage Dashboard", margin, pageH - 18);
-
-  // Page 2: table summary
-  const rows = getAggregatedReportRows();
+  // Page 2+: totals by key groupings
   pdf.addPage("a4", "landscape");
+  pageState = { y: margin };
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(14);
-  pdf.text("Aggregated Layer Summary", margin, 38);
+  pdf.setFontSize(16);
+  pdf.setTextColor(20, 32, 52);
+  pdf.text("Filtered Data Totals", margin, pageState.y);
+  pageState.y += 18;
 
-  const headers = ["Year", "Group", "Attachment", "Total Limit", "Number of Participants"];
-  const widths = [70, 300, 110, 110, 130];
-  const rowH = 16;
-  let y = 58;
+  drawGridTable({
+    state: pageState,
+    title: "Year Totals",
+    columns: [
+      { label: "Year", width: 92 },
+      { label: "Rows", width: 72, align: "right" },
+      { label: "Layer Limit", width: 130, align: "right" },
+      { label: "Available Layer", width: 140, align: "right" }
+    ],
+    rows: facts.yearRows,
+    rowToCells: (row) => [String(row.year), String(row.rows), money(row.layer), money(row.available)]
+  });
 
-  const drawHeader = () => {
-    let x = margin;
-    pdf.setFont("helvetica", "bold");
+  drawGridTable({
+    state: pageState,
+    title: "Program Totals",
+    columns: [
+      { label: "Program", width: 260 },
+      { label: "Policies", width: 80, align: "right" },
+      { label: "Rows", width: 70, align: "right" },
+      { label: "Layer Limit", width: 130, align: "right" }
+    ],
+    rows: facts.programRows,
+    rowToCells: (row) => [row.program, String(row.policyCount), String(row.rows), money(row.layer)]
+  });
+
+  drawGridTable({
+    state: pageState,
+    title: "Policy Limit Type Totals",
+    columns: [
+      { label: "Limit Type", width: 260 },
+      { label: "Policies", width: 80, align: "right" },
+      { label: "Rows", width: 70, align: "right" },
+      { label: "Layer Limit", width: 130, align: "right" }
+    ],
+    rows: facts.limitTypeRows,
+    rowToCells: (row) => [row.limitType, String(row.policyCount), String(row.rows), money(row.layer)]
+  });
+
+  drawGridTable({
+    state: pageState,
+    title: "Carrier Totals (Top 30 by Layer Limit)",
+    columns: [
+      { label: "Carrier", width: 260 },
+      { label: "Policies", width: 80, align: "right" },
+      { label: "Rows", width: 70, align: "right" },
+      { label: "Layer Limit", width: 130, align: "right" },
+      { label: "Available Layer", width: 140, align: "right" }
+    ],
+    rows: facts.carrierRows.slice(0, 30),
+    rowToCells: (row) => [row.carrier, String(row.policyCount), String(row.rows), money(row.layer), money(row.available)]
+  });
+
+  // Aggregated layer summary page
+  pdf.addPage("a4", "landscape");
+  pageState = { y: margin };
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(16);
+  pdf.setTextColor(20, 32, 52);
+  pdf.text("Aggregated Layer Summary", margin, pageState.y);
+  pageState.y += 18;
+
+  drawGridTable({
+    state: pageState,
+    title: "Layer Stack by Year and Group",
+    columns: [
+      { label: "Year", width: 72 },
+      { label: "Group", width: 320 },
+      { label: "Attachment", width: 120, align: "right" },
+      { label: "Total Limit", width: 120, align: "right" },
+      { label: "Participants", width: 110, align: "right" }
+    ],
+    rows: aggregatedRows,
+    rowToCells: (row) => [
+      String(row.Year),
+      String(row.Group),
+      money(row.Attachment),
+      money(row.TotalLimit),
+      String(row.Participants)
+    ]
+  });
+
+  // Filtered policy schedule page(s)
+  pdf.addPage("a4", "landscape");
+  pageState = { y: margin };
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(16);
+  pdf.setTextColor(20, 32, 52);
+  pdf.text("Filtered Policy Schedule", margin, pageState.y);
+  pageState.y += 18;
+
+  const scheduleRows = [...filteredRows].sort((a, b) => {
+    const ay = Number(a.Year);
+    const by = Number(b.Year);
+    if (Number.isFinite(ay) && Number.isFinite(by) && ay !== by) return ay - by;
+    const yearCmp = String(a.Year).localeCompare(String(b.Year));
+    if (yearCmp !== 0) return yearCmp;
+    if (Number(a.Attachment || 0) !== Number(b.Attachment || 0)) return Number(a.Attachment || 0) - Number(b.Attachment || 0);
+    const carrierCmp = String(a.Carrier || "").localeCompare(String(b.Carrier || ""));
+    if (carrierCmp !== 0) return carrierCmp;
+    return String(a.PolicyNumber || "").localeCompare(String(b.PolicyNumber || ""));
+  });
+
+  drawGridTable({
+    state: pageState,
+    title: "Policy Rows Matching Current Filters",
+    columns: [
+      { label: "Year", width: 42 },
+      { label: "Policy #", width: 82 },
+      { label: "Carrier", width: 124 },
+      { label: "Carrier Group", width: 104 },
+      { label: "Program", width: 86 },
+      { label: "Limit Type", width: 78 },
+      { label: "Availability", width: 70 },
+      { label: "Attachment", width: 86, align: "right" },
+      { label: "Layer Limit", width: 86, align: "right" }
+    ],
+    rows: scheduleRows,
+    rowToCells: (row) => [
+      String(row.Year || ""),
+      String(row.PolicyNumber || ""),
+      String(row.Carrier || ""),
+      String(row.CarrierGroup || ""),
+      String(row.InsuranceProgram || ""),
+      String(row.PolicyLimitType || ""),
+      normalizeAvailabilityLabel(row.Availability),
+      money(row.Attachment),
+      money(row.LayerLimit)
+    ]
+  });
+
+  const totalPages = pdf.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    pdf.setPage(p);
+    const w = pdf.internal.pageSize.getWidth();
+    const h = pdf.internal.pageSize.getHeight();
+    pdf.setFont("helvetica", "normal");
     pdf.setFontSize(9);
-    for (let i = 0; i < headers.length; i++) {
-      pdf.text(headers[i], x + 2, y);
-      x += widths[i];
-    }
-    pdf.setLineWidth(0.5);
-    pdf.line(margin, y + 3, margin + widths.reduce((a, b) => a + b, 0), y + 3);
-    y += rowH;
-  };
-
-  drawHeader();
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(8.5);
-
-  for (const r of rows) {
-    if (y > pageH - 30) {
-      pdf.addPage("a4", "landscape");
-      y = 34;
-      drawHeader();
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(8.5);
-    }
-
-    const cells = [
-      String(r.Year),
-      String(r.Group),
-      money(r.Attachment),
-      money(r.TotalLimit),
-      String(r.Participants)
-    ];
-
-    let x = margin;
-    for (let i = 0; i < cells.length; i++) {
-      const clipped = pdf.splitTextToSize(cells[i], widths[i] - 4)[0] || "";
-      pdf.text(clipped, x + 2, y);
-      x += widths[i];
-    }
-    y += rowH;
+    pdf.setTextColor(112, 122, 138);
+    pdf.text("Generated by Coverage Dashboard", margin, h - 12);
+    pdf.text(`Page ${p} of ${totalPages}`, w - margin, h - 12, { align: "right" });
   }
 
   pdf.save(filename);
-  console.log(`[Export] PDF saved: ${filename} (tableRows=${rows.length})`);
+  console.log(`[Export] PDF saved: ${filename} (tableRows=${aggregatedRows.length})`);
 }
 
 /* ================================
@@ -2672,6 +3084,285 @@ function pickPolicyParticipant(raw, datasetLabel) {
     .sort((a, b) => Number(b?.sliceLimit || 0) - Number(a?.sliceLimit || 0))[0] || parts[0];
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function policyInfoUrl(policyId, policyNumber = "", policyLimitType = "", insuranceProgram = "") {
+  const params = new URLSearchParams();
+  params.set("policyId", String(policyId || ""));
+  const policyNo = String(policyNumber || "").trim();
+  const limitType = String(policyLimitType || "").trim();
+  const program = String(insuranceProgram || "").trim();
+  if (policyNo) params.set("policyNumber", policyNo);
+  if (limitType) params.set("policyLimitType", limitType);
+  if (program) params.set("insuranceProgram", program);
+  return `/Modules/PolicyInformation/index.html?${params.toString()}`;
+}
+
+function buildTooltipTitle(items) {
+  const raw = items?.[0]?.raw || {};
+  const yr = String(raw.yearLabel ?? raw.x ?? "");
+  const ds = items?.[0]?.dataset || {};
+  if (ds?.datasetId === "sirOverlay") return `${yr} — ${ds.label || "SIR"}`;
+  if (raw.isQuotaShare) return `${yr} — Quota share`;
+  const g = String(raw.group ?? "").trim();
+  return g ? `${yr} — ${g}` : yr;
+}
+
+function buildTooltipLines(ctx, r) {
+  if (ctx?.dataset?.datasetId === "sirOverlay") {
+    const val = Number(ctx?.raw?.y ?? ctx?.parsed?.y ?? 0);
+    return [`${ctx.dataset.label}: ${money(val)}`];
+  }
+
+  const attach = r.attach ?? 0;
+  const top = r.top ?? 0;
+  const lim = Math.max(0, top - attach);
+
+  const lines = [];
+  lines.push(`Attach: ${money(attach)}`);
+  lines.push(`Limit: ${money(lim)}`);
+  lines.push(`Top: ${money(top)}`);
+  const parts = Array.isArray(r.participants) ? r.participants : [];
+  if (r.annualized) {
+    const segStartVals = parts
+      .map((p) => Number(p?.segmentStartMs || p?.policyStartMs || 0))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    const segEndVals = parts
+      .map((p) => Number(p?.segmentEndMs || p?.policyEndMs || 0))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (segStartVals.length && segEndVals.length) {
+      const segStart = Math.min(...segStartVals);
+      const segEnd = Math.max(...segEndVals);
+      lines.push(`Policy Start: ${formatFullDateUTC(segStart)}`);
+      lines.push(`Policy End: ${formatFullDateUTC(segEnd)}`);
+      const isMultiYear = parts.some((p) => {
+        const fullStart = Number(p?.policyStartMs || 0);
+        const fullEnd = Number(p?.policyEndMs || 0);
+        const pSegStart = Number(p?.segmentStartMs || fullStart || 0);
+        const pSegEnd = Number(p?.segmentEndMs || fullEnd || 0);
+        return Number.isFinite(fullStart) &&
+          Number.isFinite(fullEnd) &&
+          Number.isFinite(pSegStart) &&
+          Number.isFinite(pSegEnd) &&
+          (fullStart < pSegStart || fullEnd > pSegEnd);
+      });
+      if (isMultiYear) lines.push("Multi-year policy segment");
+    }
+  } else {
+    const startVals = parts
+      .map((p) => Number(p?.policyStartMs || 0))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    const endVals = parts
+      .map((p) => Number(p?.policyEndMs || 0))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (startVals.length && endVals.length) {
+      const minStart = Math.min(...startVals);
+      const maxStart = Math.max(...startVals);
+      const minEnd = Math.min(...endVals);
+      const maxEnd = Math.max(...endVals);
+      if (minStart === maxStart && minEnd === maxEnd) {
+        lines.push(`Policy Start: ${formatFullDateUTC(minStart)}`);
+        lines.push(`Policy End: ${formatFullDateUTC(maxEnd)}`);
+      } else {
+        lines.push(`Policy Start (earliest): ${formatFullDateUTC(minStart)}`);
+        lines.push(`Policy End (latest): ${formatFullDateUTC(maxEnd)}`);
+      }
+    }
+  }
+
+  const isPrimaryLayer = Number(attach) <= 0;
+  if (isPrimaryLayer) {
+    const sirValsPerOcc = parts
+      .map((p) => Number(p?.sirPerOcc || 0))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    const sirValsAgg = parts
+      .map((p) => Number(p?.sirAggregate || 0))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (sirValsPerOcc.length) {
+      const min = Math.min(...sirValsPerOcc);
+      const max = Math.max(...sirValsPerOcc);
+      lines.push(`SIR (Per Occ): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
+    }
+    if (sirValsAgg.length) {
+      const min = Math.min(...sirValsAgg);
+      const max = Math.max(...sirValsAgg);
+      lines.push(`SIR (Aggregate): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
+    }
+  }
+
+  const quotaParts = r.isQuotaShare && r.quotaGroupKey
+    ? parts.filter((p) => String(p?.quotaGroupKey || "") === String(r.quotaGroupKey))
+    : parts;
+  const hideUnavailable = isUnavailableLegendHidden(ctx?.chart);
+  const shownQuotaParts = hideUnavailable
+    ? quotaParts.filter((p) => !String(p?.availability || "").toLowerCase().includes("unavail"))
+    : quotaParts;
+  const isUnavailableGroup = String(r.group || "").toLowerCase() === "unavailable";
+  const shouldShowParts = !!r.isQuotaShare && shownQuotaParts.length > 1;
+
+  if (isUnavailableGroup && shownQuotaParts.length) {
+    const uniqueCarriers = [...new Set(shownQuotaParts.map((p) => p.carrier || "(unknown carrier)"))];
+    const carrierLine =
+      uniqueCarriers.length === 1
+        ? `Carrier: ${uniqueCarriers[0]}`
+        : `Carriers: ${uniqueCarriers.join(", ")}`;
+    lines.push(carrierLine);
+  }
+
+  if (shouldShowParts && shownQuotaParts.length) {
+    lines.push(`Quota share participants (${shownQuotaParts.length}):`);
+    const tooltipMaxParticipants = Number(_cache.options?.tooltipMaxParticipants || 25);
+    const show = shownQuotaParts.slice(0, tooltipMaxParticipants);
+    for (const p of show) {
+      const carrier = p.carrier || "(unknown carrier)";
+      lines.push(`• ${carrier}: ${money(p.sliceLimit)}`);
+    }
+    if (shownQuotaParts.length > tooltipMaxParticipants) {
+      lines.push(`… +${shownQuotaParts.length - tooltipMaxParticipants} more`);
+    }
+  }
+
+  return lines;
+}
+
+function getPolicyLinksForTooltip(ctx, r) {
+  const parts = Array.isArray(r?.participants) ? r.participants : [];
+  if (!parts.length) return [];
+  const hideUnavailable = isUnavailableLegendHidden(ctx?.chart);
+  const quotaParts = r.isQuotaShare && r.quotaGroupKey
+    ? parts.filter((p) => String(p?.quotaGroupKey || "") === String(r.quotaGroupKey))
+    : parts;
+  const shownParts = hideUnavailable
+    ? quotaParts.filter((p) => !String(p?.availability || "").toLowerCase().includes("unavail"))
+    : quotaParts;
+  const source = shownParts.length ? shownParts : quotaParts;
+  if (!source.length) return [];
+
+  if (r.isQuotaShare) {
+    const dedup = new Map();
+    for (const p of source) {
+      const pid = String(p?.pid || "").trim();
+      if (!pid || dedup.has(pid)) continue;
+      const carrier = String(p?.carrier || "(unknown carrier)").trim();
+      const policyNo = String(p?.policy_no || "").trim();
+      const policyLimitType = String(p?.policyLimitType || "").trim();
+      const insuranceProgram = String(p?.insuranceProgram || "").trim();
+      const label = policyNo ? `${carrier} (${policyNo})` : `${carrier} (Policy ${pid})`;
+      dedup.set(pid, { policyId: pid, policyNumber: policyNo, policyLimitType, insuranceProgram, label });
+    }
+    return Array.from(dedup.values());
+  }
+
+  const dsLabel = String(ctx?.dataset?.label || r?.group || "").trim();
+  const picked = pickPolicyParticipant(r, dsLabel);
+  const pid = String(picked?.pid || "").trim();
+  if (!pid) return [];
+  const carrier = String(picked?.carrier || "(unknown carrier)").trim();
+  const policyNo = String(picked?.policy_no || "").trim();
+  const policyLimitType = String(picked?.policyLimitType || "").trim();
+  const insuranceProgram = String(picked?.insuranceProgram || "").trim();
+  const label = policyNo ? `${carrier} (${policyNo})` : `${carrier} (Policy ${pid})`;
+  return [{ policyId: pid, policyNumber: policyNo, policyLimitType, insuranceProgram, label }];
+}
+
+function getOrCreateHtmlTooltip(chartInstance) {
+  let el = document.body.querySelector(".coverageHtmlTooltip");
+  if (el) return el;
+  el = document.createElement("div");
+  el.className = "coverageHtmlTooltip";
+  Object.assign(el.style, {
+    position: "fixed",
+    transform: "translate(0, 0)",
+    background: "rgba(2, 6, 23, 0.94)",
+    color: "rgba(248, 250, 252, 0.96)",
+    border: "1px solid rgba(148, 163, 184, 0.35)",
+    borderRadius: "10px",
+    padding: "10px 12px",
+    font: "600 14px/1.35 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+    boxShadow: "0 14px 30px rgba(2, 6, 23, 0.38)",
+    pointerEvents: "auto",
+    zIndex: "50",
+    minWidth: "260px",
+    maxWidth: "460px",
+    whiteSpace: "normal",
+    opacity: "0"
+  });
+  el.dataset.locked = "0";
+  el.addEventListener("mouseenter", () => {
+    el.dataset.locked = "1";
+  });
+  el.addEventListener("mouseleave", () => {
+    el.dataset.locked = "0";
+    el.style.opacity = "0";
+  });
+  document.body.appendChild(el);
+  return el;
+}
+
+function externalCoverageTooltipHandler(context) {
+  const { chart: chartInstance, tooltip } = context;
+  const tooltipEl = getOrCreateHtmlTooltip(chartInstance);
+  if (!tooltip || tooltip.opacity === 0 || !tooltip.dataPoints?.length) {
+    if (tooltipEl.dataset.locked === "1") return;
+    tooltipEl.style.opacity = "0";
+    return;
+  }
+  const point = tooltip.dataPoints[0];
+  const r = point?.raw || {};
+  const title = buildTooltipTitle([point]);
+  const lines = buildTooltipLines(point, r);
+  const links = getPolicyLinksForTooltip(point, r);
+
+  const linesHtml = lines.map((ln) => `<div>${escapeHtml(ln)}</div>`).join("");
+  const linksHtml = links.length
+    ? `<div style="margin-top:8px; border-top:1px solid rgba(148,163,184,0.25); padding-top:7px;">
+         <div style="font-weight:700; margin-bottom:4px;">Policy link${links.length > 1 ? "s" : ""}:</div>
+         ${links
+           .map(
+             (l) =>
+               `<div><a href="${policyInfoUrl(l.policyId, l.policyNumber, l.policyLimitType, l.insuranceProgram)}" target="_blank" rel="noopener noreferrer" style="color:#93c5fd; text-decoration:underline;">${escapeHtml(l.label)}</a></div>`
+           )
+           .join("")}
+       </div>`
+    : "";
+
+  tooltipEl.innerHTML = `
+    <div style="font-size:13px; font-weight:700; margin-bottom:5px;">${escapeHtml(title)}</div>
+    <div style="display:grid; gap:2px; font-size:12px; font-weight:500;">${linesHtml}</div>
+    ${linksHtml}
+  `;
+
+  const rect = chartInstance.canvas.getBoundingClientRect();
+  const offsetX = 18;
+  const offsetY = 18;
+
+  tooltipEl.style.left = "0px";
+  tooltipEl.style.top = "0px";
+  tooltipEl.style.opacity = "1";
+  const tipW = tooltipEl.offsetWidth || 320;
+  const tipH = tooltipEl.offsetHeight || 140;
+
+  const minLeft = 8;
+  const minTop = 8;
+  const maxLeft = window.innerWidth - tipW - 8;
+  const maxTop = window.innerHeight - tipH - 8;
+  const rawLeft = rect.left + tooltip.caretX + offsetX;
+  const rawTop = rect.top + tooltip.caretY + offsetY;
+  const left = clamp(rawLeft, minLeft, Math.max(minLeft, maxLeft));
+  const top = clamp(rawTop, minTop, Math.max(minTop, maxTop));
+
+  tooltipEl.style.left = `${left}px`;
+  tooltipEl.style.top = `${top}px`;
+  tooltipEl.style.opacity = "1";
+}
+
 export function getPolicySelectionFromEvent(evt) {
   if (!chart || !evt) return null;
   const hits = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
@@ -2692,6 +3383,8 @@ export function getPolicySelectionFromEvent(evt) {
   return {
     policyId: String(participant?.pid || ""),
     policyNumber: String(participant?.policy_no || ""),
+    policyLimitType: String(participant?.policyLimitType || ""),
+    insuranceProgram: String(participant?.insuranceProgram || ""),
     carrier: String(participant?.carrier || ""),
     carrierGroup: String(participant?.carrierGroup || ""),
     availability: String(participant?.availability || ""),
@@ -2732,7 +3425,7 @@ export async function renderCoverageChart({
 
   initialView = "carrier"
 }) {
-  if (!window.Chart) throw new Error("Chart.js must be loaded before CoverageChart.js");
+  if (!window.Chart) throw new Error("Chart.js must be loaded before coverageChartEngine.js");
 
   const canvas = document.getElementById(canvasId);
   if (!canvas) throw new Error("Canvas element not found");
@@ -2772,7 +3465,7 @@ export async function renderCoverageChart({
     allXLabels: built.xLabels,
     slices: built.slices,
     xLabels: built.xLabels,
-    options: { barThickness, categorySpacing },
+    options: { barThickness, categorySpacing, tooltipMaxParticipants },
     quotaKeySet,
     useYearAxis,
     xZoom: _cache.xZoom || 1,
@@ -2945,139 +3638,15 @@ export async function renderCoverageChart({
           }
         },
         tooltip: {
+          enabled: false,
+          external: externalCoverageTooltipHandler,
           displayColors: false,
           mode: "nearest",
           intersect: true,
           filter: (_item, index) => index === 0,
           callbacks: {
-            title: (items) => {
-              const raw = items?.[0]?.raw || {};
-              const yr = String(raw.yearLabel ?? raw.x ?? "");
-              const ds = items?.[0]?.dataset || {};
-              if (ds?.datasetId === "sirOverlay") return `${yr} — ${ds.label || "SIR"}`;
-
-              if (raw.isQuotaShare) return `${yr} — Quota share`;
-
-              const g = String(raw.group ?? "").trim();
-              return g ? `${yr} — ${g}` : yr;
-            },
-            label: (ctx) => {
-              if (ctx?.dataset?.datasetId === "sirOverlay") {
-                const val = Number(ctx?.raw?.y ?? ctx?.parsed?.y ?? 0);
-                return [`${ctx.dataset.label}: ${money(val)}`];
-              }
-
-              const r = ctx.raw || {};
-              const attach = r.attach ?? 0;
-              const top = r.top ?? 0;
-              const lim = Math.max(0, top - attach);
-
-              const lines = [];
-              lines.push(`Attach: ${money(attach)}`);
-              lines.push(`Limit: ${money(lim)}`);
-              lines.push(`Top: ${money(top)}`);
-              const parts = Array.isArray(r.participants) ? r.participants : [];
-              if (r.annualized) {
-                const segStartVals = parts
-                  .map((p) => Number(p?.segmentStartMs || p?.policyStartMs || 0))
-                  .filter((v) => Number.isFinite(v) && v > 0);
-                const segEndVals = parts
-                  .map((p) => Number(p?.segmentEndMs || p?.policyEndMs || 0))
-                  .filter((v) => Number.isFinite(v) && v > 0);
-                if (segStartVals.length && segEndVals.length) {
-                  const segStart = Math.min(...segStartVals);
-                  const segEnd = Math.max(...segEndVals);
-                  lines.push(`Policy Start: ${formatFullDateUTC(segStart)}`);
-                  lines.push(`Policy End: ${formatFullDateUTC(segEnd)}`);
-                  const isMultiYear = parts.some((p) => {
-                    const fullStart = Number(p?.policyStartMs || 0);
-                    const fullEnd = Number(p?.policyEndMs || 0);
-                    const pSegStart = Number(p?.segmentStartMs || fullStart || 0);
-                    const pSegEnd = Number(p?.segmentEndMs || fullEnd || 0);
-                    return Number.isFinite(fullStart) &&
-                      Number.isFinite(fullEnd) &&
-                      Number.isFinite(pSegStart) &&
-                      Number.isFinite(pSegEnd) &&
-                      (fullStart < pSegStart || fullEnd > pSegEnd);
-                  });
-                  if (isMultiYear) lines.push("Multi-year policy segment");
-                }
-              } else {
-                const startVals = parts
-                  .map((p) => Number(p?.policyStartMs || 0))
-                  .filter((v) => Number.isFinite(v) && v > 0);
-                const endVals = parts
-                  .map((p) => Number(p?.policyEndMs || 0))
-                  .filter((v) => Number.isFinite(v) && v > 0);
-                if (startVals.length && endVals.length) {
-                  const minStart = Math.min(...startVals);
-                  const maxStart = Math.max(...startVals);
-                  const minEnd = Math.min(...endVals);
-                  const maxEnd = Math.max(...endVals);
-                  if (minStart === maxStart && minEnd === maxEnd) {
-                    lines.push(`Policy Start: ${formatFullDateUTC(minStart)}`);
-                    lines.push(`Policy End: ${formatFullDateUTC(maxEnd)}`);
-                  } else {
-                    lines.push(`Policy Start (earliest): ${formatFullDateUTC(minStart)}`);
-                    lines.push(`Policy End (latest): ${formatFullDateUTC(maxEnd)}`);
-                  }
-                }
-              }
-              const isPrimaryLayer = Number(attach) <= 0;
-              if (isPrimaryLayer) {
-                const sirValsPerOcc = (Array.isArray(r.participants) ? r.participants : [])
-                  .map((p) => Number(p?.sirPerOcc || 0))
-                  .filter((v) => Number.isFinite(v) && v > 0);
-                const sirValsAgg = (Array.isArray(r.participants) ? r.participants : [])
-                  .map((p) => Number(p?.sirAggregate || 0))
-                  .filter((v) => Number.isFinite(v) && v > 0);
-                if (sirValsPerOcc.length) {
-                  const min = Math.min(...sirValsPerOcc);
-                  const max = Math.max(...sirValsPerOcc);
-                  lines.push(`SIR (Per Occ): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
-                }
-                if (sirValsAgg.length) {
-                  const min = Math.min(...sirValsAgg);
-                  const max = Math.max(...sirValsAgg);
-                  lines.push(`SIR (Aggregate): ${min === max ? money(min) : `${money(min)} - ${money(max)}`}`);
-                }
-              }
-
-              const quotaParts = r.isQuotaShare && r.quotaGroupKey
-                ? parts.filter((p) => String(p?.quotaGroupKey || "") === String(r.quotaGroupKey))
-                : parts;
-              const hideUnavailable = isUnavailableLegendHidden(ctx?.chart);
-              const shownQuotaParts = hideUnavailable
-                ? quotaParts.filter((p) => !String(p?.availability || "").toLowerCase().includes("unavail"))
-                : quotaParts;
-              const isUnavailableGroup = String(r.group || "").toLowerCase() === "unavailable";
-              const shouldShowParts = !!r.isQuotaShare && shownQuotaParts.length > 1;
-
-              if (isUnavailableGroup && shownQuotaParts.length) {
-                const uniqueCarriers = [...new Set(shownQuotaParts.map((p) => p.carrier || "(unknown carrier)"))];
-                const carrierLine =
-                  uniqueCarriers.length === 1
-                    ? `Carrier: ${uniqueCarriers[0]}`
-                    : `Carriers: ${uniqueCarriers.join(", ")}`;
-                lines.push(carrierLine);
-              }
-
-              if (shouldShowParts && shownQuotaParts.length) {
-                lines.push(`Quota share participants (${shownQuotaParts.length}):`);
-
-                const show = shownQuotaParts.slice(0, tooltipMaxParticipants);
-                for (const p of show) {
-                  const carrier = p.carrier || "(unknown carrier)";
-                  lines.push(`• ${carrier}: ${money(p.sliceLimit)}`);
-                }
-
-                if (shownQuotaParts.length > tooltipMaxParticipants) {
-                  lines.push(`… +${shownQuotaParts.length - tooltipMaxParticipants} more`);
-                }
-              }
-
-              return lines;
-            }
+            title: (items) => buildTooltipTitle(items),
+            label: (ctx) => buildTooltipLines(ctx, ctx.raw || {})
           }
         }
       },

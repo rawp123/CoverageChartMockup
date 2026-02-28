@@ -20,7 +20,7 @@ app.use(express.static(SRC_DIR));
 
 // Home route -> coverage chart demo (served from /src/Modules/...)
 app.get("/", (req, res) => {
-  res.sendFile(path.join(SRC_DIR, "Modules", "CoverageChart", "CoverageChartDemo.html"));
+  res.sendFile(path.join(SRC_DIR, "Modules", "CoverageChart", "index.html"));
 });
 
 app.listen(PORT, () => {

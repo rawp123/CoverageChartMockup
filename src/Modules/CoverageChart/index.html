@@ -1,0 +1,166 @@
+<!-- Modules/CoverageChart/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Coverage Chart Demo</title>
+  <link rel="stylesheet" href="/Modules/shared/css/dashboardShared.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <nav class="pageNav" aria-label="Dashboard Navigation">
+      <a class="pageNavTab" href="/Modules/ExecutiveSummary/index.html">
+        Executive Summary
+      </a>
+      <a class="pageNavTab isActive" href="/Modules/CoverageChart/index.html" aria-current="page">
+        Coverage Chart
+      </a>
+      <a class="pageNavTab" href="/Modules/PolicyInformation/index.html">
+        Policy Information
+      </a>
+      <a class="pageNavTab" href="/Modules/PolicyLanguageAnalysis/index.html">
+        Policy Language Analysis
+      </a>
+      <div class="themeRow pageNavTheme">
+        <span id="themeLabel" class="themeLabel">Dark mode</span>
+        <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
+          <span class="themeToggleThumb" aria-hidden="true"></span>
+        </button>
+      </div>
+    </nav>
+
+    <header class="topbar">
+      <div class="title">
+        <h1>Insurance Program Coverage Tower</h1>
+        <div class="subtitle">Layer Structure, Carrier Participation, and Availability by Policy Year</div>
+      </div>
+
+      <div class="controls">
+        <div class="controlBar" aria-label="Primary Controls">
+          <div class="controlPanel controlPanel--view">
+            <div class="controlBlock">
+              <label for="viewSelect">View</label>
+              <select id="viewSelect">
+                <option value="carrier">Carrier</option>
+                <option value="carrierGroup">Carrier Group</option>
+                <option value="availability">Availability</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--program">
+            <div class="controlBlock">
+              <label for="insuranceProgramSelect">Insurance Program</label>
+              <select id="insuranceProgramSelect"></select>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--years">
+            <div class="inlinePair">
+              <div class="controlBlock">
+                <label for="startYearSelect">Start Year</label>
+                <select id="startYearSelect">
+                  <option value="">All</option>
+                </select>
+              </div>
+              <div class="controlBlock">
+                <label for="endYearSelect">End Year</label>
+                <select id="endYearSelect">
+                  <option value="">All</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--zoom">
+            <div class="inlinePair">
+              <div class="controlBlock">
+                <label for="zoomMinInput">Zoom Min ($)</label>
+                <input id="zoomMinInput" type="text" inputmode="numeric" placeholder="0" />
+              </div>
+              <div class="controlBlock">
+                <label for="zoomMaxInput">Zoom Max ($)</label>
+                <input id="zoomMaxInput" type="text" inputmode="numeric" placeholder="Auto" />
+              </div>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--reset">
+            <button type="button" id="resetAll" class="primaryBtn">Reset All</button>
+            <div class="exportMenu" id="exportMenu">
+              <button id="exportBtn" class="exportBtn" type="button" aria-expanded="false" aria-controls="exportMenuPanel">Export</button>
+              <div id="exportMenuPanel" class="exportMenuPanel" hidden>
+                <button id="exportPngBtn" type="button">Export Chart (PNG)</button>
+                <button id="exportCsvBtn" type="button">Export Data (CSV)</button>
+                <button id="exportPdfBtn" type="button">Export Report (PDF)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="filterBar" aria-label="Focus Filters">
+          <div class="controlPanel controlPanel--narrow">
+            <div class="controlBlock">
+              <label for="carrierDropdown">Carrier</label>
+              <details id="carrierDropdown" class="multiDropdown">
+                <summary class="multiDropdownSummary">
+                  <span id="carrierDropdownLabel">All Carriers</span>
+                </summary>
+                <div id="carrierDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier filters"></div>
+              </details>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--narrow">
+            <div class="controlBlock">
+              <label for="carrierGroupDropdown">Carrier Group</label>
+              <details id="carrierGroupDropdown" class="multiDropdown">
+                <summary class="multiDropdownSummary">
+                  <span id="carrierGroupDropdownLabel">All Carrier Groups</span>
+                </summary>
+                <div id="carrierGroupDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier group filters"></div>
+              </details>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--narrow">
+            <div class="controlBlock">
+              <label for="policyLimitTypeSelect">Policy Limit Type</label>
+              <select id="policyLimitTypeSelect"></select>
+            </div>
+          </div>
+
+          <div class="controlPanel controlPanel--annualize">
+            <div class="controlBlock">
+              <label for="annualizeToggleBtn">Annualization</label>
+              <button id="annualizeToggleBtn" class="exportBtn" type="button" aria-pressed="false">Annualized: Off</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+        <div class="chartWrap">
+          <div id="activeFilterSummary" class="filterSummary"></div>
+          <div class="chartTopSummary">
+            <div id="availableCoverageBadge" class="coverageBadge">
+              Total Available Coverage: $0
+            </div>
+          </div>
+          <div class="chartFrame">
+            <div class="chartViewport">
+              <div class="chartSurface">
+                <canvas id="coverageCanvas"></canvas>
+              </div>
+            </div>
+          </div>
+      </div>
+      <pre id="errorBox" class="error" style="display:none;"></pre>
+    </main>
+  </div>
+  <script type="module" src="/Modules/CoverageChart/coverageChartTab.js"></script>
+</body>
+</html>

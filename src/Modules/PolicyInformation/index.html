@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Policy Information</title>
+  <link rel="stylesheet" href="/Modules/shared/css/dashboardShared.css" />
+</head>
+<body>
+  <div class="page">
+    <nav class="pageNav" aria-label="Dashboard Navigation">
+      <a class="pageNavTab" href="/Modules/ExecutiveSummary/index.html">Executive Summary</a>
+      <a class="pageNavTab" href="/Modules/CoverageChart/index.html">Coverage Chart</a>
+      <a class="pageNavTab isActive" href="/Modules/PolicyInformation/index.html" aria-current="page">
+        Policy Information
+      </a>
+      <a class="pageNavTab" href="/Modules/PolicyLanguageAnalysis/index.html">
+        Policy Language Analysis
+      </a>
+      <div class="themeRow pageNavTheme">
+        <span id="themeLabel" class="themeLabel">Dark mode</span>
+        <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
+          <span class="themeToggleThumb" aria-hidden="true"></span>
+        </button>
+      </div>
+    </nav>
+
+    <header class="topbar">
+      <div class="title">
+        <div class="titleHeadingRow">
+          <h1>Policy Information</h1>
+          <button id="resetPolicyFiltersBtn" class="exportBtn titleResetBtn" type="button">Reset Filters</button>
+        </div>
+        <div class="subtitle">Search and review policy details, limits, and placeholder terms/conditions</div>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="policySearchBar" aria-label="Policy Search Controls">
+        <div class="controlPanel">
+          <div class="controlBlock">
+            <label for="policyNumberSearch">Policy Number</label>
+            <input id="policyNumberSearch" type="search" placeholder="Type policy number..." />
+          </div>
+        </div>
+
+        <div class="controlPanel">
+          <div class="controlBlock">
+            <label for="insuranceProgramSelect">Insurance Program</label>
+            <select id="insuranceProgramSelect">
+              <option value="">All programs</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="controlPanel">
+          <div class="controlBlock">
+            <label for="policyLimitTypeSelect">Policy Limit Type</label>
+            <select id="policyLimitTypeSelect">
+              <option value="">All limit types</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="controlPanel">
+          <div class="controlBlock">
+            <label for="carrierDropdown">Carrier</label>
+            <details id="carrierDropdown" class="multiDropdown">
+              <summary class="multiDropdownSummary">
+                <span id="carrierDropdownLabel">All carriers</span>
+              </summary>
+              <div id="carrierDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier filters"></div>
+            </details>
+          </div>
+        </div>
+
+        <div class="controlPanel">
+          <div class="controlBlock">
+            <label for="carrierGroupDropdown">Carrier Group</label>
+            <details id="carrierGroupDropdown" class="multiDropdown">
+              <summary class="multiDropdownSummary">
+                <span id="carrierGroupDropdownLabel">All carrier groups</span>
+              </summary>
+              <div id="carrierGroupDropdownMenu" class="multiDropdownMenu" role="group" aria-label="Carrier group filters"></div>
+            </details>
+          </div>
+        </div>
+
+        <div class="controlPanel">
+          <div class="inlinePair">
+            <div class="controlBlock">
+              <label for="startDateFilter">Start Date</label>
+              <input id="startDateFilter" type="date" />
+            </div>
+            <div class="controlBlock">
+              <label for="endDateFilter">End Date</label>
+              <input id="endDateFilter" type="date" />
+            </div>
+          </div>
+        </div>
+
+        <div class="controlPanel">
+          <div class="inlinePair">
+            <div class="controlBlock">
+              <label for="minLimitFilter">Min Layer Limit ($)</label>
+              <input id="minLimitFilter" type="text" inputmode="numeric" placeholder="0" />
+            </div>
+            <div class="controlBlock">
+              <label for="maxLimitFilter">Max Layer Limit ($)</label>
+              <input id="maxLimitFilter" type="text" inputmode="numeric" placeholder="Auto" />
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <section class="policyWorkspace" aria-label="Policy Search Results and Details">
+        <aside class="policyResultsPanel">
+          <div class="policyResultsHeader">
+            <strong id="policyResultsCount">Policies: 0</strong>
+          </div>
+          <div id="policyResultsList" class="policyResultsList"></div>
+        </aside>
+
+        <section class="policyDetailPanel">
+          <article class="policyInfoCard policyInfoCard--full policyOverviewCard">
+            <div class="policyOverviewBar">
+              <span class="policyOverviewPanelLabel">Policy Overview</span>
+              <button id="exportPolicyReportBtn" class="exportBtn" type="button" disabled>
+                Export Policy Report (PDF)
+              </button>
+            </div>
+            <p id="policyExportStatus" class="policyExportStatus" aria-live="polite"></p>
+            <div id="policyOverviewMeta" class="policyInfoMeta"></div>
+            <p id="policyOverviewText" class="policyInfoText"></p>
+          </article>
+
+          <article class="policyInfoCard policyInfoCard--full">
+            <h2 class="policyInfoTitle">Policy Limits</h2>
+            <div class="policyTableWrap">
+              <table class="policyTable">
+                <thead>
+                  <tr>
+                    <th>Limit Type</th>
+                    <th>Attachment</th>
+                    <th>Layer Limit</th>
+                    <th>Top of Layer</th>
+                    <th>Per Occ</th>
+                    <th>Aggregate</th>
+                  </tr>
+                </thead>
+                <tbody id="policyLimitsBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="policyInfoCard">
+            <h2 class="policyInfoTitle">Terms (Placeholder)</h2>
+            <ul id="policyTermsList" class="policyInfoList"></ul>
+          </article>
+
+          <article class="policyInfoCard">
+            <h2 class="policyInfoTitle">Conditions (Placeholder)</h2>
+            <ul id="policyConditionsList" class="policyInfoList"></ul>
+          </article>
+
+          <article class="policyInfoCard">
+            <h2 class="policyInfoTitle">Exclusions (Placeholder)</h2>
+            <ul id="policyExclusionsList" class="policyInfoList"></ul>
+          </article>
+
+          <article class="policyInfoCard">
+            <h2 class="policyInfoTitle">Endorsements (Placeholder)</h2>
+            <ul id="policyEndorsementsList" class="policyInfoList"></ul>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="/Modules/PolicyInformation/policyInformationTab.js"></script>
+</body>
+</html>

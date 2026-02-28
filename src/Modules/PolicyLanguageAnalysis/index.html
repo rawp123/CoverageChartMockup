@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Policy Language Analysis</title>
+  <link rel="stylesheet" href="/Modules/shared/css/dashboardShared.css" />
+</head>
+<body>
+  <div class="page">
+    <nav class="pageNav" aria-label="Dashboard Navigation">
+      <a class="pageNavTab" href="/Modules/ExecutiveSummary/index.html">Executive Summary</a>
+      <a class="pageNavTab" href="/Modules/CoverageChart/index.html">Coverage Chart</a>
+      <a class="pageNavTab" href="/Modules/PolicyInformation/index.html">Policy Information</a>
+      <a class="pageNavTab isActive" href="/Modules/PolicyLanguageAnalysis/index.html" aria-current="page">
+        Policy Language Analysis
+      </a>
+      <div class="themeRow pageNavTheme">
+        <span id="themeLabel" class="themeLabel">Dark mode</span>
+        <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
+          <span class="themeToggleThumb" aria-hidden="true"></span>
+        </button>
+      </div>
+    </nav>
+
+    <header class="topbar">
+      <div class="title">
+        <h1>Policy Language Analysis</h1>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="policyLanguageGrid" aria-label="Policy Language Analysis Workspace">
+        <aside class="policyInfoCard languageFiltersCard">
+          <h2 class="policyInfoTitle">Filter Policies</h2>
+
+          <div class="languageFilterGrid">
+            <div class="controlBlock">
+              <label for="languageTopicSelect">Policy Language</label>
+              <select id="languageTopicSelect"></select>
+            </div>
+
+            <div class="controlBlock">
+              <label for="languageProgramSelect">Insurance Program</label>
+              <select id="languageProgramSelect">
+                <option value="">All programs</option>
+              </select>
+            </div>
+
+            <div class="inlinePair">
+              <div class="controlBlock">
+                <label for="languageStartDateFilter">Policy Start (From)</label>
+                <input id="languageStartDateFilter" type="date" />
+              </div>
+              <div class="controlBlock">
+                <label for="languageEndDateFilter">Policy Start (To)</label>
+                <input id="languageEndDateFilter" type="date" />
+              </div>
+            </div>
+
+            <div class="inlinePair">
+              <div class="controlBlock">
+                <label for="languageMinLayerLimitFilter">Min Layer Limit ($)</label>
+                <input id="languageMinLayerLimitFilter" type="text" inputmode="numeric" placeholder="0" />
+              </div>
+              <div class="controlBlock">
+                <label for="languageMaxLayerLimitFilter">Max Layer Limit ($)</label>
+                <input id="languageMaxLayerLimitFilter" type="text" inputmode="numeric" placeholder="Auto" />
+              </div>
+            </div>
+          </div>
+
+          <div class="languageFilterActions">
+            <button id="exportLanguageReportBtn" class="exportBtn" type="button">Export Report (PDF)</button>
+            <button id="resetLanguageFiltersBtn" class="exportBtn" type="button">Reset Filters</button>
+          </div>
+          <p id="languageExportStatus" class="policyExportStatus" aria-live="polite"></p>
+        </aside>
+
+        <section class="languageAnalysisPanel">
+          <article class="policyInfoCard policyInfoCard--full">
+            <div class="languageSummaryHeader">
+              <h2 id="languageTopicTitle" class="policyInfoTitle"></h2>
+              <span id="languageExcerptCount" class="languageExcerptCount"></span>
+            </div>
+            <div id="languageSummaryStats" class="languageStatGrid"></div>
+          </article>
+
+          <article class="policyInfoCard policyInfoCard--full">
+            <div class="languageSummaryHeader">
+              <h2 class="policyInfoTitle">Filtered Policy Schedule</h2>
+              <span id="languageScheduleCount" class="languageExcerptCount"></span>
+            </div>
+            <div class="policyTableWrap">
+              <table class="policyTable policyTable--language">
+                <thead>
+                  <tr>
+                    <th>Carrier</th>
+                    <th>Policy Number</th>
+                    <th>Language Topics</th>
+                    <th>Programs</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Annual</th>
+                    <th>SIR</th>
+                    <th>Attachment</th>
+                    <th>Per Occ</th>
+                    <th>Aggregate</th>
+                    <th>Layer Limit</th>
+                    <th>Language</th>
+                  </tr>
+                </thead>
+                <tbody id="languageScheduleBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="policyInfoCard policyInfoCard--full">
+            <div class="languageSummaryHeader">
+              <h2 class="policyInfoTitle">Policy Language</h2>
+            </div>
+            <div id="languageExcerptList" class="languageExcerptList"></div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="languageModal" class="languageModal" hidden>
+    <button type="button" class="languageModalBackdrop" data-close-language-modal aria-label="Close policy language dialog"></button>
+    <section class="languageModalDialog" role="dialog" aria-modal="true" aria-labelledby="languageModalTitle">
+      <header class="languageModalHeader">
+        <h2 id="languageModalTitle">Policy Language</h2>
+        <button id="languageModalCloseBtn" type="button" class="languageModalCloseBtn" aria-label="Close policy language dialog">Close</button>
+      </header>
+      <p id="languageModalMeta" class="languageModalMeta"></p>
+      <p id="languageModalBody" class="languageModalBody"></p>
+    </section>
+  </div>
+  <script type="module" src="/Modules/PolicyLanguageAnalysis/policyLanguageAnalysisTab.js"></script>
+</body>
+</html>

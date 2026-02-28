@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Executive Summary</title>
+  <link rel="stylesheet" href="/Modules/shared/css/dashboardShared.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <nav class="pageNav" aria-label="Dashboard Navigation">
+      <a class="pageNavTab isActive" href="/Modules/ExecutiveSummary/index.html" aria-current="page">
+        Executive Summary
+      </a>
+      <a class="pageNavTab" href="/Modules/CoverageChart/index.html">Coverage Chart</a>
+      <a class="pageNavTab" href="/Modules/PolicyInformation/index.html">
+        Policy Information
+      </a>
+      <a class="pageNavTab" href="/Modules/PolicyLanguageAnalysis/index.html">
+        Policy Language Analysis
+      </a>
+      <div class="themeRow pageNavTheme">
+        <span id="themeLabel" class="themeLabel">Dark mode</span>
+        <button id="themeToggleBtn" type="button" class="themeToggleBtn" aria-pressed="false" aria-label="Toggle color mode">
+          <span class="themeToggleThumb" aria-hidden="true"></span>
+        </button>
+      </div>
+    </nav>
+
+    <header class="topbar execTopbar">
+      <div class="execHeaderRow">
+        <div class="execHeaderMain">
+          <h1>Executive Summary</h1>
+          <div class="execProgramRow">
+            <label id="insuranceProgramLabel" for="insuranceProgramSelect">Insurance Program</label>
+            <select id="insuranceProgramSelect" aria-label="Insurance Program"></select>
+            <div id="injuryTypeToggle" class="injuryTypeToggle" role="group" aria-label="Injury Type"></div>
+          </div>
+        </div>
+        <div id="execCoverageSpan" class="execCoverageSpan">Coverage Span: --</div>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="executiveDashboard" aria-label="Executive Summary Facts">
+        <div class="kpiGrid">
+          <article class="kpiCard">
+            <div class="kpiLabel">Total Gross Limits</div>
+            <div id="execKpiGross" class="kpiValue">$0</div>
+          </article>
+          <article class="kpiCard">
+            <div class="kpiLabel">Total Available Limits</div>
+            <div id="execKpiAvailable" class="kpiValue">$0</div>
+          </article>
+          <article class="kpiCard">
+            <div class="kpiLabel">% Available</div>
+            <div id="execKpiAvailablePct" class="kpiValue">0%</div>
+          </article>
+          <article class="kpiCard kpiCard--facts">
+            <div class="execFactsTitle">Summary Facts</div>
+            <ul id="execSummaryFacts" class="execFactsList"></ul>
+          </article>
+          <article class="kpiCard">
+            <div class="kpiLabel">Largest Carrier Group % of Gross</div>
+            <div id="execKpiLargestGroupPct" class="kpiValue">0%</div>
+          </article>
+          <article class="kpiCard">
+            <div class="kpiLabel">Top 3 Carrier Groups % of Gross</div>
+            <div id="execKpiTop3Pct" class="kpiValue">0%</div>
+          </article>
+          <article class="kpiCard">
+            <div class="kpiLabel">Unique Policies</div>
+            <div id="execKpiPolicyCount" class="kpiValue">0</div>
+          </article>
+        </div>
+
+        <div class="executiveGrid">
+          <section class="executivePanel">
+            <div class="executivePanelTitle">Limits by Carrier Group</div>
+            <div id="execCarrierGroupSubtitle" class="execPanelSubtitle">Top 7 shown; remainder grouped</div>
+            <div class="executiveCanvasWrap">
+              <canvas id="execCarrierGroupCanvas"></canvas>
+            </div>
+          </section>
+
+          <section class="executivePanel">
+            <div class="executivePanelTitle">Total Limits by Policy Year</div>
+            <div class="executiveCanvasWrap executiveCanvasWrap--wide">
+              <canvas id="execYearTrendCanvas"></canvas>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <div class="execDataCanvas" hidden>
+        <canvas id="coverageCanvas"></canvas>
+      </div>
+
+      <pre id="errorBox" class="error" style="display:none;"></pre>
+    </main>
+  </div>
+  <script type="module" src="/Modules/ExecutiveSummary/executiveSummaryTab.js"></script>
+</body>
+</html>
