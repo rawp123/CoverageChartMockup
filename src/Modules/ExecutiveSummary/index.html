@@ -32,11 +32,6 @@
       <div class="execHeaderRow">
         <div class="execHeaderMain">
           <h1>Executive Summary</h1>
-          <div class="execProgramRow">
-            <label id="insuranceProgramLabel" for="insuranceProgramSelect">Insurance Program</label>
-            <select id="insuranceProgramSelect" aria-label="Insurance Program"></select>
-            <div id="injuryTypeToggle" class="injuryTypeToggle" role="group" aria-label="Injury Type"></div>
-          </div>
         </div>
         <div id="execCoverageSpan" class="execCoverageSpan">Coverage Span: --</div>
       </div>
@@ -44,6 +39,77 @@
 
     <main class="content">
       <section class="executiveDashboard" aria-label="Executive Summary Facts">
+        <section class="execFiltersPanel" aria-label="Executive Filters">
+          <div class="execFiltersRow">
+            <div class="execFilterBlock execFilterBlock--program">
+              <label id="insuranceProgramLabel" for="insuranceProgramSelect">Insurance Program</label>
+              <select id="insuranceProgramSelect" aria-label="Insurance Program"></select>
+            </div>
+
+            <div class="execFilterBlock execFilterBlock--coverageType">
+              <label for="injuryTypeToggle">Coverage Type</label>
+              <div id="injuryTypeToggle" class="injuryTypeToggle" role="group" aria-label="Coverage Type"></div>
+            </div>
+
+            <div class="execFilterBlock execFilterBlock--yearRange">
+              <label for="execYearFromSelect">Policy Year Range</label>
+              <div class="execYearRangeRow">
+                <select id="execYearFromSelect" aria-label="Policy Year From">
+                  <option value="">From</option>
+                </select>
+                <span class="execYearRangeDash">to</span>
+                <select id="execYearToSelect" aria-label="Policy Year To">
+                  <option value="">To</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              id="execMoreFiltersBtn"
+              class="execMoreFiltersBtn"
+              type="button"
+              aria-expanded="false"
+              aria-controls="execMoreFiltersDrawer"
+            >
+              More filters
+            </button>
+          </div>
+
+          <div id="execMoreFiltersDrawer" class="execMoreFiltersDrawer" hidden>
+            <div class="execFiltersDrawerGrid">
+              <div class="execFilterBlock execFilterBlock--drawerField">
+                <label for="execCarrierDropdown">Carrier</label>
+                <details id="execCarrierDropdown" class="multiDropdown">
+                  <summary class="multiDropdownSummary">
+                    <span id="execCarrierDropdownLabel">All Carriers</span>
+                  </summary>
+                  <div
+                    id="execCarrierDropdownMenu"
+                    class="multiDropdownMenu"
+                    role="group"
+                    aria-label="Carrier filters"
+                  ></div>
+                </details>
+              </div>
+
+              <div class="execFilterBlock execFilterBlock--drawerField">
+                <label for="execCarrierGroupDropdown">Carrier Group</label>
+                <details id="execCarrierGroupDropdown" class="multiDropdown">
+                  <summary class="multiDropdownSummary">
+                    <span id="execCarrierGroupDropdownLabel">All Carrier Groups</span>
+                  </summary>
+                  <div
+                    id="execCarrierGroupDropdownMenu"
+                    class="multiDropdownMenu"
+                    role="group"
+                    aria-label="Carrier Group filters"
+                  ></div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div class="kpiGrid">
           <article class="kpiCard">
             <div class="kpiLabel">Total Gross Limits</div>

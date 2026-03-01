@@ -758,15 +758,31 @@ body{
 }
 
 .filterSummary{
-  font-size: 14px;
-  color: var(--muted);
-  line-height: 1.4;
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
+}
+
+.filterChip{
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  max-width: 100%;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--border) 82%, transparent 18%);
+  background: color-mix(in oklab, var(--panel) 72%, var(--bg1) 28%);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.1;
   white-space: nowrap;
-  overflow-x: auto;
 }
 
 .yearTotalsStrip{
@@ -1151,11 +1167,176 @@ body{
   background: color-mix(in oklab, #1d4ed8 30%, rgba(255,255,255,0.04) 70%);
 }
 
+.injuryTypeBtn:disabled{
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .execCoverageSpan{
   font-size: 12px;
   color: var(--muted);
   font-weight: 600;
   white-space: nowrap;
+}
+
+.execFiltersPanel{
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: linear-gradient(
+    180deg,
+    rgba(255,255,255,0.055) 0%,
+    rgba(255,255,255,0.03) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  display: grid;
+  gap: 6px;
+}
+
+.execFiltersRow{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.execFilterBlock{
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.execFilterBlock label{
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.execFilterBlock--program{
+  flex: 1 1 210px;
+  max-width: 290px;
+}
+
+.execFilterBlock--coverageType{
+  flex: 0 0 auto;
+}
+
+.execFilterBlock--yearRange{
+  flex: 0 1 270px;
+}
+
+.execFilterBlock--basis{
+  flex: 0 0 auto;
+}
+
+.execFilterBlock--drawerField{
+  flex: 1 1 220px;
+}
+
+.execFiltersPanel select{
+  color-scheme: inherit;
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 9px;
+  min-height: 34px;
+  font-size: 13px;
+  outline: none;
+}
+
+.execFiltersPanel select:focus-visible{
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* Keep native select popup options legible across OS/browser theme handling. */
+.execFiltersPanel select option{
+  color: CanvasText;
+  background-color: Canvas;
+}
+
+.execFiltersPanel select option:checked{
+  color: HighlightText;
+  background-color: Highlight;
+}
+
+.execYearRangeRow{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.execYearRangeRow select{
+  min-width: 102px;
+}
+
+.execYearRangeDash{
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.execMoreFiltersBtn{
+  margin-left: auto;
+  align-self: center;
+  min-height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+
+.execMoreFiltersBtn:hover{
+  color: var(--text);
+}
+
+.execMoreFiltersBtn:focus-visible{
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.execMoreFiltersBtn::after{
+  content: " ▾";
+  font-size: 11px;
+}
+
+.execMoreFiltersBtn[aria-expanded="true"]::after{
+  content: " ▴";
+}
+
+.execMoreFiltersDrawer{
+  border-top: 1px solid color-mix(in oklab, var(--border) 85%, transparent 15%);
+  padding-top: 7px;
+}
+
+.execFiltersDrawerGrid{
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.execFiltersDrawerGrid .multiDropdownSummary{
+  min-height: 34px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.execFiltersPanel .injuryTypeToggle{
+  min-height: 34px;
+}
+
+.execFiltersPanel .injuryTypeBtn{
+  min-height: 28px;
+  padding: 4px 10px;
 }
 
 .titleHeadingRow{
@@ -1940,5 +2121,30 @@ body.modalOpen{
 
   .policyOverviewBar .exportBtn{
     margin-left: 0;
+  }
+}
+
+@media (max-width: 900px){
+  .execFilterBlock--program,
+  .execFilterBlock--coverageType,
+  .execFilterBlock--yearRange,
+  .execFilterBlock--basis,
+  .execFilterBlock--drawerField{
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .execMoreFiltersBtn{
+    margin-left: 0;
+    align-self: flex-start;
+  }
+
+  .execYearRangeRow{
+    width: 100%;
+  }
+
+  .execYearRangeRow select{
+    min-width: 0;
+    flex: 1 1 0;
   }
 }

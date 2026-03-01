@@ -74,7 +74,6 @@
         });
 
         const sel = document.getElementById("viewSelect");
-        sel.addEventListener("change", (e) => setView(e.target.value));
 
         const startYearSelect = document.getElementById("startYearSelect");
         const endYearSelect = document.getElementById("endYearSelect");
@@ -111,6 +110,7 @@
           annualizeToggleBtn.textContent = annualizedMode ? "Annualized: On" : "Annualized: Off";
           annualizeToggleBtn.setAttribute("aria-pressed", String(annualizedMode));
         };
+        sel.addEventListener("change", (e) => setView(e.target.value));
         syncAnnualizeToggleUI();
 
         coverageCanvas.addEventListener("click", (evt) => {
@@ -362,12 +362,30 @@
           return `${values.length} ${singularLabel}s`;
         }
 
+        function renderFilterChips(chipValues) {
+          if (!activeFilterSummary) return;
+          activeFilterSummary.innerHTML = "";
+          const fragment = document.createDocumentFragment();
+          chipValues
+            .filter((value) => String(value || "").trim().length)
+            .forEach((value) => {
+              const chip = document.createElement("span");
+              chip.className = "filterChip";
+              chip.textContent = value;
+              fragment.appendChild(chip);
+            });
+          activeFilterSummary.appendChild(fragment);
+        }
+
         function updateFilterSummary() {
           const startYear = startYearSelect.value || "All";
           const endYear = endYearSelect.value || "All";
           const yearsText = startYear === "All" && endYear === "All"
             ? "All years"
             : `${startYear} to ${endYear}`;
+          const yearsChipText = startYear !== "All" && endYear !== "All"
+            ? `${startYear}\u2013${endYear}`
+            : yearsText;
 
           const carriers = selectedValuesFromCheckboxMenu(carrierDropdownMenu);
           const carrierGroups = selectedValuesFromCheckboxMenu(carrierGroupDropdownMenu);
@@ -401,13 +419,14 @@
             toggleCoverageBadgeBtn.setAttribute("aria-pressed", String(showCoverageBadge));
           }
 
-          activeFilterSummary.textContent =
-            `Program: ${insuranceProgramSelect.value || "(none)"} | ` +
-            `Policy Limit Type: ${policyLimitTypeSelect.value || "(none)"} | ` +
-            `Annualized: ${annualizedMode ? "On" : "Off"} | ` +
-            `Years: ${yearsText} | ` +
-            `Carriers: ${summarizeSelection(carriers, "carrier")} | ` +
-            `Carrier Groups: ${summarizeSelection(carrierGroups, "group")}`;
+          renderFilterChips([
+            insuranceProgramSelect.value || "(none)",
+            policyLimitTypeSelect.value || "(none)",
+            yearsChipText,
+            `Annualized: ${annualizedMode ? "On" : "Off"}`,
+            summarizeSelection(carriers, "carrier"),
+            summarizeSelection(carrierGroups, "group")
+          ]);
         }
 
         startYearSelect.addEventListener("input", applyYearFilters);

@@ -31,6 +31,10 @@ let _cache = {
   _wheelBound: false,
   hiddenLegendCarriers: new Set(),
   hiddenLegendCarrierGroups: new Set(),
+  legendSelections: {
+    carrier: new Set(),
+    carrierGroup: new Set()
+  },
   showCoverageTotals: true,
   filters: {
     startYear: null,
@@ -165,6 +169,67 @@ const normKey = (k) =>
     .replace(/[^a-z0-9]/g, "");
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+const normalizeLegendValue = (v) =>
+  String(v || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+const normalizeLegendSelectionSet = (items) => {
+  const out = new Set();
+  for (const item of items || []) {
+    const value = normalizeLegendValue(item);
+    if (value) out.add(value);
+  }
+  return out;
+};
+const getLegendSelectionSet = (view = currentView) => {
+  if (view === "carrier") {
+    _cache.legendSelections = _cache.legendSelections || {};
+    _cache.legendSelections.carrier = _cache.legendSelections.carrier || new Set();
+    return _cache.legendSelections.carrier;
+  }
+  if (view === "carrierGroup") {
+    _cache.legendSelections = _cache.legendSelections || {};
+    _cache.legendSelections.carrierGroup = _cache.legendSelections.carrierGroup || new Set();
+    return _cache.legendSelections.carrierGroup;
+  }
+  return new Set();
+};
+const pruneLegendSelectionSet = (view, availableValues) => {
+  const selected = getLegendSelectionSet(view);
+  if (!selected.size) return;
+  const available = new Set((availableValues || []).map((v) => normalizeLegendValue(v)).filter(Boolean));
+  for (const value of Array.from(selected)) {
+    if (!available.has(value)) selected.delete(value);
+  }
+};
+function colorWithAlpha(color, alpha = 1) {
+  const a = clamp(Number(alpha), 0, 1);
+  const raw = String(color || "").trim();
+  if (!raw) return `rgba(255,255,255,${a})`;
+
+  const hex = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    const v = hex[1];
+    const full = v.length === 3 ? v.split("").map((ch) => ch + ch).join("") : v;
+    const n = Number.parseInt(full, 16);
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+
+  const rgb = raw.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+  if (rgb) {
+    const r = Number(rgb[1]);
+    const g = Number(rgb[2]);
+    const b = Number(rgb[3]);
+    const baseAlpha = rgb[4] === undefined ? 1 : clamp(Number(rgb[4]), 0, 1);
+    return `rgba(${r}, ${g}, ${b}, ${baseAlpha * a})`;
+  }
+
+  return raw;
+}
 const legendTitleForView = (view) => {
   if (view === "carrierGroup") return "Carrier Group";
   if (view === "carrier") return "Carrier";
@@ -465,6 +530,97 @@ const quotaShareGuidesPlugin = {
           ctx.lineTo(right, py);
           ctx.stroke();
         }
+      });
+    });
+
+    ctx.restore();
+  }
+};
+
+const insolventHatchOverlayPlugin = {
+  id: "insolventHatchOverlay",
+  afterDatasetsDraw(chartInstance) {
+    const { ctx, scales, chartArea } = chartInstance;
+    const yScale = scales?.y;
+    if (!ctx || !yScale || !chartArea) return;
+
+    const theme = getThemeName();
+    const hatchStroke = theme === "light" ? "rgba(127, 29, 29, 0.88)" : "rgba(255, 255, 255, 0.76)";
+    const hatchStep = 7;
+    const hideUnavailable = isUnavailableLegendHidden(chartInstance);
+
+    const drawHatchSegment = (left, right, bottomValue, topValue) => {
+      const yBottom = yScale.getPixelForValue(Number(bottomValue));
+      const yTop = yScale.getPixelForValue(Number(topValue));
+      if (!Number.isFinite(yBottom) || !Number.isFinite(yTop)) return;
+      const top = Math.min(yTop, yBottom);
+      const bottom = Math.max(yTop, yBottom);
+      const width = Math.max(0, right - left);
+      const height = Math.max(0, bottom - top);
+      if (width < 1 || height < 1) return;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(left, top, width, height);
+      ctx.clip();
+      ctx.strokeStyle = hatchStroke;
+      ctx.lineWidth = 1;
+      for (let x = left - height; x < right + height; x += hatchStep) {
+        ctx.beginPath();
+        ctx.moveTo(x, bottom);
+        ctx.lineTo(x + height, top);
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+    ctx.clip();
+
+    chartInstance.data.datasets.forEach((ds, di) => {
+      if (!ds || ds?.datasetId === "sirOverlay" || ds?.type === "line") return;
+      const meta = chartInstance.getDatasetMeta(di);
+      if (!meta || meta.hidden) return;
+
+      meta.data.forEach((bar, pi) => {
+        const raw = ds?.data?.[pi];
+        if (!raw) return;
+        const props = bar.getProps(["x", "width"], false);
+        const x = Number(props?.x);
+        const width = Number(props?.width);
+        if (!Number.isFinite(x) || !Number.isFinite(width) || width <= 0) return;
+        const left = x - width / 2;
+        const right = x + width / 2;
+
+        if (raw?.isQuotaShare) {
+          const parts = (Array.isArray(raw?.participants) ? raw.participants : [])
+            .filter((p) => !hideUnavailable || !String(p?.availability || "").toLowerCase().includes("unavail"));
+          if (!parts.length) return;
+          let cumulative = Number(raw?.attach || 0);
+          for (const p of parts) {
+            const lim = Number(p?.sliceLimit || 0);
+            if (!Number.isFinite(lim) || lim <= 0) continue;
+            const next = cumulative + lim;
+            if (String(p?.availability || "").toLowerCase().includes("unavail")) {
+              drawHatchSegment(left, right, cumulative, next);
+            }
+            cumulative = next;
+          }
+          return;
+        }
+
+        const isUnavailableLayer =
+          /unavail/i.test(String(raw?.group || ds?.label || "")) ||
+          (Array.isArray(raw?.participants)
+            && raw.participants.some((p) => String(p?.availability || "").toLowerCase().includes("unavail")));
+        if (!isUnavailableLayer) return;
+
+        const attach = Number(raw?.attach || 0);
+        const top = Number(raw?.top || 0);
+        if (!Number.isFinite(attach) || !Number.isFinite(top) || top <= attach) return;
+        drawHatchSegment(left, right, attach, top);
       });
     });
 
@@ -1456,19 +1612,7 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   const selection = getSelectionSets();
   const usingYearAxis = !!_cache.useYearAxis;
   const annualized = !!_cache.filters?.annualized;
-  const hiddenCarriers = _cache.hiddenLegendCarriers || new Set();
-  const hiddenCarrierGroups = _cache.hiddenLegendCarrierGroups || new Set();
-  const isHiddenBySyntheticLegend = (s) => {
-    if (view === "carrier") {
-      const c = String(s?.carrier || "").trim();
-      return !!c && hiddenCarriers.has(c);
-    }
-    if (view === "carrierGroup") {
-      const g = String(s?.carrierGroup || "").trim();
-      return !!g && hiddenCarrierGroups.has(g);
-    }
-    return false;
-  };
+  const legendSelection = getLegendSelectionSet(view);
 
   const keyOf = (s) => {
     if (view === "carrier" || view === "carrierGroup") {
@@ -1499,7 +1643,6 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
   if (usingYearAxis) {
     const bucketMap = new Map();
     for (const s of slices) {
-      if (isHiddenBySyntheticLegend(s)) continue;
       const group = keyOf(s);
       groups.add(group);
 
@@ -1733,7 +1876,6 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
     */
   } else {
     for (const s of slices) {
-      if (isHiddenBySyntheticLegend(s)) continue;
       const group = keyOf(s);
       groups.add(group);
 
@@ -1923,6 +2065,111 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
 
     return gradient;
   };
+  const quotaGradientForCarrierViewWithOpacity = (context, pointRaw, opacity = 1) => {
+    const hideUnavailable = isUnavailableLegendHidden(context?.chart);
+    const hasLegendSelection = legendSelection.size > 0;
+    const applyParticipantIsolation = hasLegendSelection && opacity >= 0.999;
+    if (!applyParticipantIsolation && !(opacity < 1)) {
+      return quotaGradientForCarrierView(context, pointRaw);
+    }
+    const parts = (Array.isArray(pointRaw?.participants) ? pointRaw.participants : [])
+      .filter((p) => !hideUnavailable || !String(p?.availability || "").toLowerCase().includes("unavail"));
+    const weightedParts = parts
+      .map((p) => ({
+        limit: Number(p?.sliceLimit || 0),
+        color: colorWithAlpha(
+          String(p?.availability || "").toLowerCase().includes("unavail")
+            ? "#94a3b8"
+            : colorFromString(p?.carrier || "Quota share"),
+          opacity * (
+            applyParticipantIsolation
+              ? (legendSelection.has(normalizeLegendValue(p?.carrier)) ? 1 : 0.2)
+              : 1
+          )
+        )
+      }))
+      .filter((p) => Number.isFinite(p.limit) && p.limit > 0);
+    if (!weightedParts.length) return colorWithAlpha(colorFromString("Quota share"), opacity);
+    const total = weightedParts.reduce((sum, p) => sum + p.limit, 0);
+    if (!Number.isFinite(total) || total <= 0) return weightedParts[0].color;
+    const chartInstance = context?.chart;
+    const yScale = chartInstance?.scales?.y;
+    const canvasCtx = chartInstance?.ctx;
+    if (!yScale || !canvasCtx) return weightedParts[0].color;
+    const top = Number(pointRaw?.top || 0);
+    const attach = Number(pointRaw?.attach || 0);
+    const yTop = yScale.getPixelForValue(top);
+    const yBottom = yScale.getPixelForValue(attach);
+    if (!Number.isFinite(yTop) || !Number.isFinite(yBottom) || yTop === yBottom) return weightedParts[0].color;
+    const gradient = canvasCtx.createLinearGradient(0, yBottom, 0, yTop);
+    let running = 0;
+    for (const p of weightedParts) {
+      const start = clamp(running / total, 0, 1);
+      running += p.limit;
+      const end = clamp(running / total, 0, 1);
+      gradient.addColorStop(start, p.color);
+      gradient.addColorStop(end, p.color);
+    }
+    return gradient;
+  };
+  const quotaGradientForCarrierGroupViewWithOpacity = (context, pointRaw, opacity = 1) => {
+    const hideUnavailable = isUnavailableLegendHidden(context?.chart);
+    const hasLegendSelection = legendSelection.size > 0;
+    const applyParticipantIsolation = hasLegendSelection && opacity >= 0.999;
+    if (!applyParticipantIsolation && !(opacity < 1)) {
+      return quotaGradientForCarrierGroupView(context, pointRaw);
+    }
+    const parts = (Array.isArray(pointRaw?.participants) ? pointRaw.participants : [])
+      .filter((p) => !hideUnavailable || !String(p?.availability || "").toLowerCase().includes("unavail"));
+    const weightedParts = parts
+      .map((p) => ({
+        limit: Number(p?.sliceLimit || 0),
+        color: colorWithAlpha(
+          String(p?.availability || "").toLowerCase().includes("unavail")
+            ? "#94a3b8"
+            : colorFromString(p?.carrierGroup || "Quota share"),
+          opacity * (
+            applyParticipantIsolation
+              ? (legendSelection.has(normalizeLegendValue(p?.carrierGroup)) ? 1 : 0.2)
+              : 1
+          )
+        )
+      }))
+      .filter((p) => Number.isFinite(p.limit) && p.limit > 0);
+    if (!weightedParts.length) return colorWithAlpha(colorFromString(String(pointRaw?.group || "Quota share")), opacity);
+    const total = weightedParts.reduce((sum, p) => sum + p.limit, 0);
+    if (!Number.isFinite(total) || total <= 0) return weightedParts[0].color;
+    const chartInstance = context?.chart;
+    const yScale = chartInstance?.scales?.y;
+    const canvasCtx = chartInstance?.ctx;
+    if (!yScale || !canvasCtx) return weightedParts[0].color;
+    const top = Number(pointRaw?.top || 0);
+    const attach = Number(pointRaw?.attach || 0);
+    const yTop = yScale.getPixelForValue(top);
+    const yBottom = yScale.getPixelForValue(attach);
+    if (!Number.isFinite(yTop) || !Number.isFinite(yBottom) || yTop === yBottom) return weightedParts[0].color;
+    const gradient = canvasCtx.createLinearGradient(0, yBottom, 0, yTop);
+    let running = 0;
+    for (const p of weightedParts) {
+      const start = clamp(running / total, 0, 1);
+      running += p.limit;
+      const end = clamp(running / total, 0, 1);
+      gradient.addColorStop(start, p.color);
+      gradient.addColorStop(end, p.color);
+    }
+    return gradient;
+  };
+  const pointMatchesLegendSelection = (datasetGroup, rawPoint) => {
+    const hasLegendSelection = legendSelection.size > 0;
+    if (!hasLegendSelection || !(view === "carrier" || view === "carrierGroup")) return true;
+    if (legendSelection.has(normalizeLegendValue(datasetGroup))) return true;
+    const parts = Array.isArray(rawPoint?.participants) ? rawPoint.participants : [];
+    for (const p of parts) {
+      const value = view === "carrier" ? normalizeLegendValue(p?.carrier) : normalizeLegendValue(p?.carrierGroup);
+      if (value && legendSelection.has(value)) return true;
+    }
+    return false;
+  };
 
   return groupList.map((group) => {
     const points = [];
@@ -1992,6 +2239,7 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
 
     const mutedFill = "rgba(255,255,255,0.92)";
     const mutedBorder = "rgba(0,0,0,0.9)";
+    const selectedBorder = getThemeName() === "light" ? "rgba(185, 28, 28, 0.98)" : "rgba(248, 113, 113, 0.98)";
     const isQuotaDataset = points.some((p) => !!p?.isQuotaShare);
 
     return {
@@ -2013,21 +2261,35 @@ function buildDatasetsForView({ slices, xLabels, view, barThickness, categorySpa
       backgroundColor: (context) => {
         const raw = context?.raw || null;
         const pointInFocus = !selection.active || !!raw?.isHighlighted;
-        if (!pointInFocus) return mutedFill;
+        const legendInFocus = pointMatchesLegendSelection(group, raw);
+        const opacity = legendInFocus ? 1 : 0.2;
+        if (!pointInFocus) return colorWithAlpha(mutedFill, opacity);
         if (view === "carrier" && isQuotaDataset && raw?.isQuotaShare) {
-          return quotaGradientForCarrierView(context, raw);
+          return quotaGradientForCarrierViewWithOpacity(context, raw, opacity);
         }
         if (view === "carrierGroup" && isQuotaDataset && raw?.isQuotaShare) {
-          return quotaGradientForCarrierGroupView(context, raw);
+          return quotaGradientForCarrierGroupViewWithOpacity(context, raw, opacity);
         }
-        return bg;
+        return colorWithAlpha(bg, opacity);
       },
       borderColor: (context) => {
         const raw = context?.raw || null;
         const pointInFocus = !selection.active || !!raw?.isHighlighted;
-        return pointInFocus ? "rgba(11, 17, 27, 0.62)" : mutedBorder;
+        const hasLegendSelection = legendSelection.size > 0;
+        const legendInFocus = pointMatchesLegendSelection(group, raw);
+        if (hasLegendSelection && legendInFocus && pointInFocus) return selectedBorder;
+        const opacity = legendInFocus ? 1 : 0.2;
+        const base = pointInFocus ? "rgba(11, 17, 27, 0.62)" : mutedBorder;
+        return colorWithAlpha(base, opacity);
       },
-      borderWidth: 1,
+      borderWidth: (context) => {
+        const raw = context?.raw || null;
+        const pointInFocus = !selection.active || !!raw?.isHighlighted;
+        const hasLegendSelection = legendSelection.size > 0;
+        const legendInFocus = pointMatchesLegendSelection(group, raw);
+        if (hasLegendSelection && legendInFocus && pointInFocus) return 2.5;
+        return 1;
+      },
       borderRadius: 2,
       borderSkipped: false
     };
@@ -3222,7 +3484,9 @@ function buildTooltipLines(ctx, r) {
     const show = shownQuotaParts.slice(0, tooltipMaxParticipants);
     for (const p of show) {
       const carrier = p.carrier || "(unknown carrier)";
-      lines.push(`• ${carrier}: ${money(p.sliceLimit)}`);
+      const status = String(p?.availability || "").trim();
+      const statusSuffix = /unavail/i.test(status) ? " (Unavailable)" : "";
+      lines.push(`• ${carrier}${statusSuffix}: ${money(p.sliceLimit)}`);
     }
     if (shownQuotaParts.length > tooltipMaxParticipants) {
       lines.push(`… +${shownQuotaParts.length - tooltipMaxParticipants} more`);
@@ -3287,7 +3551,7 @@ function getOrCreateHtmlTooltip(chartInstance) {
     padding: "10px 12px",
     font: "600 14px/1.35 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
     boxShadow: "0 14px 30px rgba(2, 6, 23, 0.38)",
-    pointerEvents: "auto",
+    pointerEvents: "none",
     zIndex: "50",
     minWidth: "260px",
     maxWidth: "460px",
@@ -3301,6 +3565,7 @@ function getOrCreateHtmlTooltip(chartInstance) {
   el.addEventListener("mouseleave", () => {
     el.dataset.locked = "0";
     el.style.opacity = "0";
+    el.style.pointerEvents = "none";
   });
   document.body.appendChild(el);
   return el;
@@ -3312,6 +3577,7 @@ function externalCoverageTooltipHandler(context) {
   if (!tooltip || tooltip.opacity === 0 || !tooltip.dataPoints?.length) {
     if (tooltipEl.dataset.locked === "1") return;
     tooltipEl.style.opacity = "0";
+    tooltipEl.style.pointerEvents = "none";
     return;
   }
   const point = tooltip.dataPoints[0];
@@ -3346,6 +3612,7 @@ function externalCoverageTooltipHandler(context) {
   tooltipEl.style.left = "0px";
   tooltipEl.style.top = "0px";
   tooltipEl.style.opacity = "1";
+  tooltipEl.style.pointerEvents = "auto";
   const tipW = tooltipEl.offsetWidth || 320;
   const tipH = tooltipEl.offsetHeight || 140;
 
@@ -3361,6 +3628,7 @@ function externalCoverageTooltipHandler(context) {
   tooltipEl.style.left = `${left}px`;
   tooltipEl.style.top = `${top}px`;
   tooltipEl.style.opacity = "1";
+  tooltipEl.style.pointerEvents = "auto";
 }
 
 export function getPolicySelectionFromEvent(evt) {
@@ -3477,6 +3745,10 @@ export async function renderCoverageChart({
     _wheelBound: _cache._wheelBound || false,
     hiddenLegendCarriers: _cache.hiddenLegendCarriers || new Set(),
     hiddenLegendCarrierGroups: _cache.hiddenLegendCarrierGroups || new Set(),
+    legendSelections: {
+      carrier: normalizeLegendSelectionSet(_cache.legendSelections?.carrier),
+      carrierGroup: normalizeLegendSelectionSet(_cache.legendSelections?.carrierGroup)
+    },
     showCoverageTotals: typeof _cache.showCoverageTotals === "boolean" ? _cache.showCoverageTotals : true,
     filters: {
       startYear: null,
@@ -3528,7 +3800,7 @@ export async function renderCoverageChart({
       labels: _cache.xLabels,
       datasets: sirDataset ? [...datasets, sirDataset] : datasets
     },
-    plugins: [xRangeBarsPlugin, outlineBarsPlugin, quotaShareGuidesPlugin, boxValueLabelsPlugin, yearAvailableTotalsPlugin],
+    plugins: [xRangeBarsPlugin, insolventHatchOverlayPlugin, outlineBarsPlugin, quotaShareGuidesPlugin, boxValueLabelsPlugin, yearAvailableTotalsPlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -3553,18 +3825,22 @@ export async function renderCoverageChart({
           position: "right",
           align: "start",
           onClick: (evt, legendItem, legend) => {
-            if (legendItem?._syntheticCarrier) {
-              const value = String(legendItem?.text || "").trim();
+            if (currentView === "carrier" || currentView === "carrierGroup") {
+              const value = normalizeLegendValue(legendItem?.text);
               if (!value) return;
-              const hiddenSet = currentView === "carrier"
-                ? (_cache.hiddenLegendCarriers || (_cache.hiddenLegendCarriers = new Set()))
-                : currentView === "carrierGroup"
-                ? (_cache.hiddenLegendCarrierGroups || (_cache.hiddenLegendCarrierGroups = new Set()))
-                : null;
-              if (!hiddenSet) return;
-              if (hiddenSet.has(value)) hiddenSet.delete(value);
-              else hiddenSet.add(value);
-              rebuildChart();
+              const selected = getLegendSelectionSet(currentView);
+              const e = evt?.native || evt;
+              const multiSelect = !!(e?.ctrlKey || e?.metaKey);
+              if (multiSelect) {
+                if (selected.has(value)) selected.delete(value);
+                else selected.add(value);
+              } else if (selected.size === 1 && selected.has(value)) {
+                selected.clear();
+              } else {
+                selected.clear();
+                selected.add(value);
+              }
+              legend?.chart?.update("none");
               return;
             }
             const defaultClick = Chart?.defaults?.plugins?.legend?.onClick;
@@ -3617,21 +3893,40 @@ export async function renderCoverageChart({
               for (const value of values) {
                 const key = value.toLowerCase();
                 if (existing.has(key)) continue;
-                const hiddenSet = currentView === "carrier"
-                  ? (_cache.hiddenLegendCarriers || new Set())
-                  : currentView === "carrierGroup"
-                  ? (_cache.hiddenLegendCarrierGroups || new Set())
-                  : new Set();
                 labels.push({
                   text: value,
                   fillStyle: colorFromString(value),
                   strokeStyle: colorFromString(value),
                   lineWidth: 0,
-                  hidden: hiddenSet.has(value),
+                  hidden: false,
                   datasetIndex: -1,
                   index: -1,
                   _syntheticCarrier: true
                 });
+              }
+
+              const allValues = labels.map((item) => normalizeLegendValue(item?.text)).filter(Boolean);
+              pruneLegendSelectionSet(currentView, allValues);
+              const selected = getLegendSelectionSet(currentView);
+              const hasSelected = selected.size > 0;
+              const liveLegendText = String(
+                chartInstance?.options?.plugins?.legend?.labels?.color
+                  || getChartThemeColors().legendText
+              );
+              const activeText = liveLegendText;
+              const inactiveText = colorWithAlpha(liveLegendText, 0.55);
+
+              for (const item of labels) {
+                const value = normalizeLegendValue(item?.text);
+                const isSelected = !hasSelected || selected.has(value);
+                const baseFill = item.fillStyle || colorFromString(value);
+                const baseStroke = item.strokeStyle || baseFill;
+                item.hidden = false;
+                item.fillStyle = hasSelected && !isSelected ? colorWithAlpha(baseFill, 0.2) : baseFill;
+                item.strokeStyle = hasSelected && !isSelected ? colorWithAlpha(baseStroke, 0.2) : baseStroke;
+                item.lineWidth = hasSelected && isSelected ? 2 : 1;
+                item.fontColor = hasSelected && !isSelected ? inactiveText : activeText;
+                item.color = hasSelected && !isSelected ? inactiveText : activeText;
               }
               return labels;
             }
